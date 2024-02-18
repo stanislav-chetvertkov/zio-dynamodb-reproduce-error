@@ -1,6 +1,7 @@
 package example.dao
 
-import example.dao.Dao.{IdMapping, MappedEntity, Resource, ResourceId, ResourcePrefix}
+import example.SchemaParser.ProcessedSchemaTyped
+import example.dao.Dao.{IdMapping, MappedEntity, Resource, ResourceId, ResourceType}
 import zio.dynamodb.ProjectionExpression.$
 import zio.{Chunk, ULayer, ZIO, stream}
 import zio.dynamodb.{AttrMap, AttributeValue, ConditionExpression, DynamoDBExecutor, DynamoDBQuery, Item, KeyConditionExpr, LastEvaluatedKey}
@@ -8,7 +9,7 @@ import zio.dynamodb.{AttrMap, AttributeValue, ConditionExpression, DynamoDBExecu
 
 
 object Dao {
-  type IdMapping = ResourcePrefix => Option[MappedEntity] => ResourceId
+  type IdMapping = ResourceType => Option[MappedEntity] => ResourceId
 
   sealed trait Field {
     def toAttributeValue: AttributeValue
@@ -25,20 +26,22 @@ object Dao {
     }
   }
 
-  case class Resource(prefix: ResourcePrefix, id: ResourceId)
-
-  object Resource {
-    def fromValues(prefix: String, id: String): Resource = Resource(ResourcePrefix(prefix), ResourceId(id))
+  case class Resource(resourceType: ResourceType, id: ResourceId){
+    def flatPrefix = s"${resourceType.value}#${id.value}"
   }
 
-  case class ResourcePrefix(value: String) extends AnyVal
+  object Resource {
+    def fromValues(prefix: String, id: String): Resource = Resource(ResourceType(prefix), ResourceId(id))
+  }
+
+  case class ResourceType(value: String) extends AnyVal
   case class ResourceId(value: String) extends AnyVal
 
   // given resource type and an object(entity) of this type we could generate a resource id (or extract it from the entity if it could be derived from the entity itself
 
 
-  case class MappedEntity(resourcePrefix: ResourcePrefix, id: String, fields: Map[String, Field], parent: Option[MappedEntity]) {
-    def sk(time: Long) = s"${resourcePrefix.value}#$id#$time"
+  case class MappedEntity(resourcePrefix: ResourceType, id: ResourceId, fields: Map[String, Field], parent: Option[MappedEntity]) {
+    def sk(time: Long) = s"${resourcePrefix.value}#${id.value}#$time"
   }
 
   // when a new entity is being persisted there could be no id yet, there has to be a function that gives us the id
@@ -51,13 +54,32 @@ case class Repository(tableName: String,
                      (executor: ULayer[DynamoDBExecutor]) {
 
   def save(entity: MappedEntity): ZIO[Any, Throwable, Option[Item]] = {
-    val attrMap = toAttrMap(entity)
+    val attrMap: AttrMap = toAttrMap(entity, System.currentTimeMillis())
     DynamoDBQuery.putItem(tableName, attrMap).execute.provideLayer(executor)
   }
 
-  def fetch(parentId: Resource, resource: Resource): ZIO[Any, Throwable, List[Item]] = {
-    val pkValue = parentId.prefix.value + "#" + parentId.id.value
-    val sortPrefix = resource.prefix.value + "#" + resource.id.value
+  def saveTyped[T: ProcessedSchemaTyped](value: T): ZIO[Any, Throwable, Option[Item]] = {
+    val attrs = implicitly[ProcessedSchemaTyped[T]].toAttrMap(value)
+    DynamoDBQuery.putItem(tableName, attrs).execute.provideLayer(executor)
+  }
+
+  def readTyped[T: ProcessedSchemaTyped](id: String, parent: String): ZIO[Any, Throwable, Option[T]] = {
+    val proc = implicitly[ProcessedSchemaTyped[T]]
+    val prefix = proc.resourcePrefix
+
+    val query = DynamoDBQuery.querySomeItem(tableName, 10)
+      .whereKey($("pk").partitionKey === parent && $("sk").sortKey.beginsWith(prefix + "#" + id))
+
+    val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute.provideLayer(executor)
+
+    x.map(_._1.headOption.map { item =>
+      implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
+    })
+  }
+
+  def fetchHistory(parentId: Resource, resource: Resource): ZIO[Any, Throwable, List[Item]] = {
+    val pkValue = parentId.flatPrefix
+    val sortPrefix = resource.flatPrefix
     val query = DynamoDBQuery.querySomeItem(tableName, 10)
       .whereKey($("pk").partitionKey === pkValue && $("sk").sortKey.beginsWith(sortPrefix))
 
@@ -66,12 +88,21 @@ case class Repository(tableName: String,
     x.map(_._1.toList)
   }
 
-  def toAttrMap(entity: MappedEntity) = {
+  def fetch(parentId: Resource, resource: Resource): ZIO[Any, Throwable, Option[Item]] = {
+    val pkValue = parentId.flatPrefix
+    val sortPrefix = resource.flatPrefix
+    val query = DynamoDBQuery.querySomeItem(tableName, 10)
+      .whereKey($("pk").partitionKey === pkValue && $("sk").sortKey === sortPrefix)
+
+    query.execute.provideLayer(executor).map(_._1.headOption)
+  }
+
+  private def toAttrMap(entity: MappedEntity, millis: Long) = {
     val attributes : Map[String, AttributeValue] = Map(
-      "pk" -> AttributeValue(entity.parent.map(_.resourcePrefix.value).getOrElse("no_resource_type") + "#" + entity.parent.map(_.id).getOrElse("missing_id")),
-      "sk" -> AttributeValue(entity.sk(System.currentTimeMillis())), // "voice_endpoint#123#123123123123",
+      "pk" -> AttributeValue(entity.parent.map(_.resourcePrefix.value).getOrElse("no_resource_type") + "#" + entity.parent.map(_.id.value).getOrElse("missing_id")),
+      "sk" -> AttributeValue(entity.sk(millis)), // "voice_endpoint#123#123123123123",
       "resourcePrefix" -> AttributeValue(entity.resourcePrefix.value),
-      "id" -> AttributeValue(entity.id)
+      "id" -> AttributeValue(entity.id.value)
     )
 
     val k = entity.fields.toList.map(f => f._1 -> f._2.toAttributeValue).toMap

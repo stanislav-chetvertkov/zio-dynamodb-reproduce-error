@@ -11,6 +11,7 @@ import scala.language.implicitConversions
 object SchemaParser {
 
   final case class resource_prefix(name: String) extends StaticAnnotation
+  // uniquely identifies the record
   final case class id_field() extends StaticAnnotation
   final case class parent_field() extends StaticAnnotation
 
@@ -43,7 +44,7 @@ object SchemaParser {
     def fromAttrMap(attrMap: AttrMap): T
   }
 
-  implicit def toProcessor[T](schema: Schema[T]): ProcessedSchemaTyped[T] = validateTyped(schema)
+  implicit def toProcessor[T](implicit schema: Schema[T]): ProcessedSchemaTyped[T] = validateTyped(schema)
 
   def validateTyped[T](schema: Schema[T]): ProcessedSchemaTyped[T] = {
     val record = schema match {
@@ -51,7 +52,7 @@ object SchemaParser {
       case other => throw new RuntimeException(s"Expected record, got $other")
     }
 
-    val idField: Schema.Field[Any, String] = findIdField(record.fields).get
+    val idField: Schema.Field[Any, String] = findIdField(record.fields).getOrElse(throw new RuntimeException("Id field not found for the schema")) //todo: add schema name
     val parentField: Schema.Field[Any, String] = record.fields.find(_.annotations.exists(_.isInstanceOf[parent_field]))
       .map(_.asInstanceOf[Schema.Field[Any, String]]).get
     val resourcePrefixValue: String = findResourcePrefix(schema).getOrElse(throw new RuntimeException("Resource prefix not found"))
@@ -60,7 +61,6 @@ object SchemaParser {
 
     new ProcessedSchemaTyped[T] {
       override def toAttrMap(input: T): AttrMap = {
-
         val otherAttributes: Map[String, AttributeValue] = otherFields.map { field =>
           val value = field.get(input)
           val attrValue = value match {

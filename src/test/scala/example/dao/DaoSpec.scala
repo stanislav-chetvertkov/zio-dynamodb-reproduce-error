@@ -42,15 +42,41 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
 
   implicit val schema: Schema[SmsEndpoint] = DeriveSchema.gen
 
+  "scan all resource" in withDynamo { layer =>
+    CreateTable.createTableExample.execute.provide(layer).runUnsafe
+    val repo = Repository(tableName = CreateTable.TableName, Vector.empty)(layer)
+
+    val smsEndpoint1 = SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")
+    val smsEndpoint2 = SmsEndpoint(id = "SMS2", value = "payload2", parent = "provider#3")
+    val smsEndpoint3 = SmsEndpoint(id = "SMS3", value = "payload3", parent = "provider#4")
+
+    repo.saveTyped(smsEndpoint1).runUnsafe
+    repo.saveTyped(smsEndpoint2).runUnsafe
+    repo.saveTyped(smsEndpoint3).runUnsafe
+
+    val list = repo.scanAll[SmsEndpoint].runUnsafe
+    list.toSet mustBe Set(smsEndpoint1, smsEndpoint2, smsEndpoint3)
+  }
+
   "write typed schema" in withDynamo { layer =>
     CreateTable.createTableExample.execute.provide(layer).runUnsafe
-    implicit val writer: ProcessedSchemaTyped[SmsEndpoint] = SchemaParser.validateTyped(schema)
+    implicit val schemaProcessor: ProcessedSchemaTyped[SmsEndpoint] = SchemaParser.validateTyped(schema)
 
     val repo = Repository(tableName = CreateTable.TableName, Vector.empty)(layer)
+
     val saveResult = repo.saveTyped(SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")).runUnsafe
 
     val readResult = repo.readTyped[SmsEndpoint]("SMS1", "provider#3").runUnsafe
     readResult.get mustBe SmsEndpoint("SMS1", "payload", "provider#3")
+
+    repo.saveTyped(SmsEndpoint(id = "SMS2", value = "payload2", parent = "provider#3")).runUnsafe
+    repo.saveTyped(SmsEndpoint(id = "SMS3", value = "payload3", parent = "provider#4")).runUnsafe
+
+    val list = repo.list[SmsEndpoint]("provider#3").runUnsafe
+    list.length mustBe 2
+
+    val list2 = repo.list[SmsEndpoint]("provider#4").runUnsafe
+    list2.length mustBe 1
   }
 
   "typed schema" in {
@@ -60,6 +86,8 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
 
     val instance = SmsEndpoint(id = "1", value = "2", parent = "3")
     val r = implicitly[SchemaParser.ProcessedSchemaTyped[SmsEndpoint]].toAttrMap(instance)
+    r.map.get("sk").map(_.decode[String].value).get must startWith("sms_endpoint#1")
+
     print(r)
   }
 

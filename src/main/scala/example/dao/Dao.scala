@@ -63,6 +63,39 @@ case class Repository(tableName: String,
     DynamoDBQuery.putItem(tableName, attrs).execute.provideLayer(executor)
   }
 
+  def list[T: ProcessedSchemaTyped](parent: String): ZIO[Any, Throwable, Chunk[T]] = {
+    val proc = implicitly[ProcessedSchemaTyped[T]]
+    val prefix = proc.resourcePrefix
+
+    val query = DynamoDBQuery.querySomeItem(tableName, 10)
+      .whereKey($("pk").partitionKey === parent && $("sk").sortKey.beginsWith(prefix))
+
+    val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute.provideLayer(executor)
+
+    x.map(_._1.map { item =>
+      implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
+    })
+  }
+
+  /**
+   * we can either have a slow version that fetches all the items and then filters them by the sort key prefix
+   * or use GSI
+   * @tparam T
+   * @return
+   */
+  def scanAll[T: ProcessedSchemaTyped] = {
+    val proc = implicitly[ProcessedSchemaTyped[T]]
+    val prefix = proc.resourcePrefix
+
+    val x = DynamoDBQuery.scanSomeItem(tableName, 10)
+      .where($("sk").beginsWith(prefix))
+      .execute.provideLayer(executor)
+
+    x.map(_._1.map { item =>
+      implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
+    })
+  }
+
   def readTyped[T: ProcessedSchemaTyped](id: String, parent: String): ZIO[Any, Throwable, Option[T]] = {
     val proc = implicitly[ProcessedSchemaTyped[T]]
     val prefix = proc.resourcePrefix

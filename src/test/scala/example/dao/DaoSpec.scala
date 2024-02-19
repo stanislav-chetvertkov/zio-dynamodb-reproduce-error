@@ -42,6 +42,35 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
 
   implicit val schema: Schema[SmsEndpoint] = DeriveSchema.gen
 
+  "get resource by id (without specifying its parent)" in withDynamo { layer =>
+    CreateTable.createTableExample.execute.provide(layer).runUnsafe
+    val repo = Repository(tableName = CreateTable.TableName, Vector.empty)(layer)
+
+    val smsEndpoint1 = SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")
+    repo.saveTyped(smsEndpoint1).runUnsafe
+
+    Thread.sleep(12000) //for data to replicate to the secondary index
+    val list = repo.readTyped[SmsEndpoint]("SMS1").runUnsafe
+    list.toSet mustBe null
+  }
+
+  "list all resource by type" in withDynamo { layer =>
+    CreateTable.createTableExample.execute.provide(layer).runUnsafe
+    val repo = Repository(tableName = CreateTable.TableName, Vector.empty)(layer)
+
+    val smsEndpoint1 = SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")
+    val smsEndpoint2 = SmsEndpoint(id = "SMS2", value = "payload2", parent = "provider#3")
+    val smsEndpoint3 = SmsEndpoint(id = "SMS3", value = "payload3", parent = "provider#4")
+
+    repo.saveTyped(smsEndpoint1).runUnsafe
+    repo.saveTyped(smsEndpoint2).runUnsafe
+    repo.saveTyped(smsEndpoint3).runUnsafe
+
+//    Thread.sleep(10000) //for data to replicate to the secondary index
+    val list = repo.listAll[SmsEndpoint].runUnsafe
+    list.toSet mustBe Set(smsEndpoint1, smsEndpoint2, smsEndpoint3)
+  }
+
   "scan all resource" in withDynamo { layer =>
     CreateTable.createTableExample.execute.provide(layer).runUnsafe
     val repo = Repository(tableName = CreateTable.TableName, Vector.empty)(layer)
@@ -66,7 +95,7 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
 
     val saveResult = repo.saveTyped(SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")).runUnsafe
 
-    val readResult = repo.readTyped[SmsEndpoint]("SMS1", "provider#3").runUnsafe
+    val readResult = repo.readTypedByParent[SmsEndpoint]("SMS1", "provider#3").runUnsafe
     readResult.get mustBe SmsEndpoint("SMS1", "payload", "provider#3")
 
     repo.saveTyped(SmsEndpoint(id = "SMS2", value = "payload2", parent = "provider#3")).runUnsafe

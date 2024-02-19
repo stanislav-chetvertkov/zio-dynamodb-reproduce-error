@@ -4,7 +4,7 @@ import example.SchemaParser.ProcessedSchemaTyped
 import example.dao.Dao.{IdMapping, MappedEntity, Resource, ResourceId, ResourceType}
 import zio.dynamodb.ProjectionExpression.$
 import zio.{Chunk, ULayer, ZIO, stream}
-import zio.dynamodb.{AttrMap, AttributeValue, ConditionExpression, DynamoDBExecutor, DynamoDBQuery, Item, KeyConditionExpr, LastEvaluatedKey}
+import zio.dynamodb.{AttrMap, AttributeValue, ConditionExpression, DynamoDBExecutor, DynamoDBQuery, Item, KeyConditionExpr, LastEvaluatedKey, ProjectionExpression}
 
 
 
@@ -83,7 +83,7 @@ case class Repository(tableName: String,
    * @tparam T
    * @return
    */
-  def scanAll[T: ProcessedSchemaTyped] = {
+  def scanAll[T: ProcessedSchemaTyped]: ZIO[Any, Throwable, Chunk[T]] = {
     val proc = implicitly[ProcessedSchemaTyped[T]]
     val prefix = proc.resourcePrefix
 
@@ -96,7 +96,34 @@ case class Repository(tableName: String,
     })
   }
 
-  def readTyped[T: ProcessedSchemaTyped](id: String, parent: String): ZIO[Any, Throwable, Option[T]] = {
+  def listAll[T: ProcessedSchemaTyped]: ZIO[Any, Throwable, Chunk[T]] = {
+    val proc = implicitly[ProcessedSchemaTyped[T]]
+    val prefix = proc.resourcePrefix
+
+    for {
+      x <- DynamoDBQuery.scanSomeItem(tableName, 10) //todo: figure out why querySomeItems does not work - is there a difference in projections
+        .where($("gsi_pk1") === prefix)
+        .execute.provideLayer(executor)
+    } yield x._1.map { item =>
+      implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
+    }
+  }
+
+  def readTyped[T: ProcessedSchemaTyped](id: String): ZIO[Any, Throwable, Option[T]] = {
+    val proc = implicitly[ProcessedSchemaTyped[T]]
+    val prefix = proc.resourcePrefix
+
+    val query = DynamoDBQuery.querySomeItem(tableName, 10)
+      .whereKey($("gsi_pk1").partitionKey === prefix && $("gsi_sk1").sortKey.beginsWith())
+
+    val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute.provideLayer(executor)
+
+    x.map(_._1.headOption.map { item =>
+      implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
+    })
+  }
+
+  def readTypedByParent[T: ProcessedSchemaTyped](id: String, parent: String): ZIO[Any, Throwable, Option[T]] = {
     val proc = implicitly[ProcessedSchemaTyped[T]]
     val prefix = proc.resourcePrefix
 

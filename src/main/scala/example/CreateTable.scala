@@ -10,18 +10,20 @@ object CreateTable {
     createTable(
       tableName = TableName,
       keySchema = KeySchema(hashKey = "pk", sortKey = "sk"),
-      BillingMode.provisioned(readCapacityUnit = 10, writeCapacityUnit = 10)
+      BillingMode.provisioned(readCapacityUnit = 100, writeCapacityUnit = 100)
     )(
       attrDefnString("pk"),
-      attrDefnString("sk")
+      attrDefnString("sk"),
+      attrDefnString("gsi_pk1"),
+      attrDefnString("gsi_sk1")
     )
-//      .gsi(
-//        "indexName",
-//        KeySchema("key2", "sortKey2"),
-//        ProjectionType.Include("nonKeyField1", "nonKeyField2"),
-//        readCapacityUnit = 10,
-//        writeCapacityUnit = 10
-//      )
+      .gsi(
+        "gsi1",
+        KeySchema(hashKey = "gsi_pk1", sortKey = "gsi_sk1"),
+        ProjectionType.All,
+        readCapacityUnit = 100,
+        writeCapacityUnit = 100
+      )
 
 
 }

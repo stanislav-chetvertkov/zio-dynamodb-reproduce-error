@@ -72,9 +72,12 @@ object SchemaParser {
           field.name -> attrValue
         }.toMap
 
+        val now = Instant.now().toString
         val attributes : Map[String, AttributeValue] = Map (
-          "sk" -> AttributeValue(resourcePrefix + "#" + idField.get(input) + "#" + Instant.now().toString), //todo: add timestamp
-          "pk" -> AttributeValue(parentField.get(input))
+          "sk" -> AttributeValue(resourcePrefix + "#" + idField.get(input) + "#" + now), //todo: add timestamp
+          "pk" -> AttributeValue(parentField.get(input)),
+          "gsi_pk1" -> AttributeValue(resourcePrefix),
+          "gsi_sk1" -> AttributeValue(idField.get(input) + "#" + now)
         ) ++ otherAttributes
 
         AttrMap(attributes)

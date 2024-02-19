@@ -62,6 +62,7 @@ trait WithDynamoDB {
   def withDynamo[A](runTest: ULayer[DynamoDBExecutor] => A): A = {
     withContainers{dyna =>
       val executorLayer = createLayer(dyna.urlValue.url())
+      println(dyna.portBindings)
       runTest(executorLayer)
     }
   }

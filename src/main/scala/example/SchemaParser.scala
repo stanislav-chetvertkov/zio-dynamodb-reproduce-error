@@ -1,6 +1,7 @@
 package example
 
 import zio.Chunk
+import zio.dynamodb.SchemaUtils.Timestamp
 import zio.dynamodb.{AttrMap, AttributeValue, Codec, Decoder, SchemaUtils}
 import zio.schema.{DynamicValue, Schema, TypeId}
 
@@ -41,7 +42,8 @@ object SchemaParser {
   trait ProcessedSchemaTyped [T] {
     def resourcePrefix: String
     def toAttrMap(input: T): AttrMap
-    def fromAttrMap(attrMap: AttrMap): T
+    def fromAttrMapWithTimestamp(attrMap: AttrMap): (T, Timestamp)
+    def fromAttrMap(attrMap: AttrMap): T = fromAttrMapWithTimestamp(attrMap)._1
   }
 
   implicit def toProcessor[T](implicit schema: Schema[T]): ProcessedSchemaTyped[T] = validateTyped(schema)
@@ -77,22 +79,27 @@ object SchemaParser {
           "sk" -> AttributeValue(resourcePrefix + "#" + idField.get(input) + "#" + now), //todo: add timestamp
           "pk" -> AttributeValue(parentField.get(input)),
           "gsi_pk1" -> AttributeValue(resourcePrefix),
-          "gsi_sk1" -> AttributeValue(idField.get(input) + "#" + now)
+          "gsi_sk1" -> AttributeValue(idField.get(input) + "#" + now),
+          "timestamp" -> AttributeValue(now)
         ) ++ otherAttributes
 
         AttrMap(attributes)
       }
 
-      override def fromAttrMap(attrMap: AttrMap): T = {
+      override def fromAttrMapWithTimestamp(attrMap: AttrMap): (T, Timestamp) = {
         val params = attrMap.map.keys.map(k => SchemaUtils.attributeValueString(k) -> attrMap.map(k)).toMap
 
         schema match {
-          case s @ Schema.CaseClass3(id0, field1, field2, fiel3, _, annotations) =>
+          case s @ Schema.CaseClass3(_, _, _, _, _, _) =>
             val attributeValueMap = SchemaUtils.attributeValueMap(params)
-            val dec = SchemaUtils.caseClass3Decoder(s)
+            SchemaUtils.caseClass3Decoder(s)
               .apply(attributeValueMap)
               .getOrElse(throw new RuntimeException("Failed to parse"))
-            dec
+          case s @ Schema.CaseClass4(_, _, _, _, _, _, _) =>
+            val attributeValueMap = SchemaUtils.attributeValueMap(params)
+            SchemaUtils.caseClass4Decoder(s)
+              .apply(attributeValueMap)
+              .getOrElse(throw new RuntimeException("Failed to parse"))
         }
 
       }

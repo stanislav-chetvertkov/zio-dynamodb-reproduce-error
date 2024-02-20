@@ -3,6 +3,7 @@ package example.dao
 import com.dimafeng.testcontainers.scalatest.TestContainerForEach
 import example.SchemaParser.{ProcessedSchemaTyped, id_field, parent_field, resource_prefix}
 import example.dao.Dao._
+import example.dao.untyped.UntypedRepository
 import example.{CreateTable, DynamoContainer, SchemaParser, WithDynamoDB}
 import org.scalatest.EitherValues
 import org.scalatest.concurrent.ScalaFutures
@@ -11,10 +12,8 @@ import org.scalatest.matchers.must.Matchers
 import zio.dynamodb.Item
 import zio.schema.{DeriveSchema, DynamicValue, Schema}
 import zio.{Exit, IO, Unsafe, ZLayer}
-
+import java.time.Instant
 import scala.concurrent.duration.DurationInt
-import scala.annotation.StaticAnnotation
-
 
 class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with EitherValues with TestContainerForEach with WithDynamoDB {
 
@@ -33,30 +32,52 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
     }
   }
 
-  // create annotation for marking a field as a partition key
-
   @resource_prefix("sms_endpoint")
   case class SmsEndpoint(@id_field id: String,
                          value: String,
                          @parent_field parent: String) // will keep it as a string for now
 
-  implicit val schema: Schema[SmsEndpoint] = DeriveSchema.gen
+  @resource_prefix("voice_endpoint")
+  case class VoiceEndpoint(@id_field voice_id: String,
+                           ip: String,
+                           capacity: Int,
+                           @parent_field parent: String) // will keep it as a string for now
 
-  "get resource by id (without specifying its parent)" in withDynamo { layer =>
+  implicit val smsSchema: Schema[SmsEndpoint] = DeriveSchema.gen
+  implicit val voiceSchema: Schema[VoiceEndpoint] = DeriveSchema.gen
+
+  "get resource history by id (without parent)" in withDynamo { layer =>
     CreateTable.createTableExample.execute.provide(layer).runUnsafe
-    val repo = Repository(tableName = CreateTable.TableName, Vector.empty)(layer)
+    val repo = Repository(tableName = CreateTable.TableName)(layer)
 
     val smsEndpoint1 = SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")
     repo.saveTyped(smsEndpoint1).runUnsafe
 
-    Thread.sleep(12000) //for data to replicate to the secondary index
-    val list = repo.readTyped[SmsEndpoint]("SMS1").runUnsafe
-    list.toSet mustBe null
+    val smsEndpoint1_updated = SmsEndpoint(id = "SMS1", value = "updated payload", parent = "provider#3")
+    repo.saveTyped(smsEndpoint1_updated).runUnsafe
+
+    val history = repo.readHistory[SmsEndpoint](id = "SMS1").runUnsafe
+    history.length mustBe 2
+    history.map(_._1) mustBe List(smsEndpoint1, smsEndpoint1_updated) //fields are in the wrong order
+
+    val timestamps = history.map(_._2)
+    Instant.parse(timestamps(0)).isBefore(Instant.parse(timestamps(1))) mustBe true
+  }
+
+  "get resource by id (without specifying its parent)" in withDynamo { layer =>
+    CreateTable.createTableExample.execute.provide(layer).runUnsafe
+    val repo = Repository(tableName = CreateTable.TableName)(layer)
+
+    val smsEndpoint1 = SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")
+    repo.saveTyped(smsEndpoint1).runUnsafe
+
+    val opt = repo.readTyped[SmsEndpoint]("SMS1").runUnsafe
+    opt.get mustBe SmsEndpoint(id = "SMS1", value = "payload", "provider#3")
   }
 
   "list all resource by type" in withDynamo { layer =>
     CreateTable.createTableExample.execute.provide(layer).runUnsafe
-    val repo = Repository(tableName = CreateTable.TableName, Vector.empty)(layer)
+    val repo = Repository(tableName = CreateTable.TableName)(layer)
 
     val smsEndpoint1 = SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")
     val smsEndpoint2 = SmsEndpoint(id = "SMS2", value = "payload2", parent = "provider#3")
@@ -66,14 +87,13 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
     repo.saveTyped(smsEndpoint2).runUnsafe
     repo.saveTyped(smsEndpoint3).runUnsafe
 
-//    Thread.sleep(10000) //for data to replicate to the secondary index
     val list = repo.listAll[SmsEndpoint].runUnsafe
     list.toSet mustBe Set(smsEndpoint1, smsEndpoint2, smsEndpoint3)
   }
 
   "scan all resource" in withDynamo { layer =>
     CreateTable.createTableExample.execute.provide(layer).runUnsafe
-    val repo = Repository(tableName = CreateTable.TableName, Vector.empty)(layer)
+    val repo = Repository(tableName = CreateTable.TableName)(layer)
 
     val smsEndpoint1 = SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")
     val smsEndpoint2 = SmsEndpoint(id = "SMS2", value = "payload2", parent = "provider#3")
@@ -87,11 +107,21 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
     list.toSet mustBe Set(smsEndpoint1, smsEndpoint2, smsEndpoint3)
   }
 
+  "write typed schema (voice)" in withDynamo{ layer =>
+    CreateTable.createTableExample.execute.provide(layer).runUnsafe
+    val repo = Repository(tableName = CreateTable.TableName)(layer)
+    val voiceEndpoint = VoiceEndpoint(voice_id = "voice1", ip = "127.0.0.1", capacity = 10, parent = "provider#3")
+    val saveResult = repo.saveTyped(voiceEndpoint).runUnsafe
+
+    val opt = repo.readTyped[VoiceEndpoint]("voice1").runUnsafe
+    opt.get mustBe voiceEndpoint
+  }
+
   "write typed schema" in withDynamo { layer =>
     CreateTable.createTableExample.execute.provide(layer).runUnsafe
-    implicit val schemaProcessor: ProcessedSchemaTyped[SmsEndpoint] = SchemaParser.validateTyped(schema)
+    implicit val schemaProcessor: ProcessedSchemaTyped[SmsEndpoint] = SchemaParser.validateTyped(smsSchema)
 
-    val repo = Repository(tableName = CreateTable.TableName, Vector.empty)(layer)
+    val repo = Repository(tableName = CreateTable.TableName)(layer)
 
     val saveResult = repo.saveTyped(SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")).runUnsafe
 
@@ -123,17 +153,17 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
   "test schema" in {
     val instance = SmsEndpoint("1", "2", "3")
 
-    val writer = SchemaParser.validate(schema)
-    val dynamic = DynamicValue.fromSchemaAndValue(schema, instance)
+    val writer = SchemaParser.validate(smsSchema)
+    val dynamic = DynamicValue.fromSchemaAndValue(smsSchema, instance)
     writer.toAttrMap(dynamic) mustBe Right(())
 
-    schema.fromDynamic(schema.toDynamic(SmsEndpoint("1", "2", "3"))).toOption mustBe Some(SmsEndpoint("1", "2", "3"))
+    smsSchema.fromDynamic(smsSchema.toDynamic(SmsEndpoint("1", "2", "3"))).toOption mustBe Some(SmsEndpoint("1", "2", "3"))
   }
 
   "test" in withDynamo { layer =>
     CreateTable.createTableExample.execute.provide(layer).runUnsafe
 
-    val repo = Repository(tableName = CreateTable.TableName, Vector.empty)(layer)
+    val repo = UntypedRepository(tableName = CreateTable.TableName, Vector.empty)(layer)
 
     val x = MappedEntity(ResourceType("voice_endpoint"), ResourceId("123"), Map.empty,
       Some(MappedEntity(ResourceType("provider"), ResourceId("OT12323"), Map.empty, None)),
@@ -151,7 +181,7 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
 
   "versions history" in withDynamo { layer =>
     CreateTable.createTableExample.execute.provide(layer).runUnsafe
-    val repo = Repository(tableName = CreateTable.TableName, Vector.empty)(layer)
+    val repo = UntypedRepository(tableName = CreateTable.TableName, Vector.empty)(layer)
 
     val initial = MappedEntity(ResourceType("voice_endpoint"), ResourceId("123"), Map("value" -> Field.StringField("v1")),
       Some(MappedEntity(ResourceType("provider"), ResourceId("OT12323"), Map.empty, None)),

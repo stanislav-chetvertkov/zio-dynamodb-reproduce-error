@@ -3,10 +3,9 @@ package example.dao
 import example.SchemaParser.ProcessedSchemaTyped
 import example.dao.Dao.{IdMapping, MappedEntity, Resource, ResourceId, ResourceType}
 import zio.dynamodb.ProjectionExpression.$
+import zio.dynamodb.SchemaUtils.Timestamp
 import zio.{Chunk, ULayer, ZIO, stream}
 import zio.dynamodb.{AttrMap, AttributeValue, ConditionExpression, DynamoDBExecutor, DynamoDBQuery, Item, KeyConditionExpr, LastEvaluatedKey, ProjectionExpression}
-
-
 
 object Dao {
   type IdMapping = ResourceType => Option[MappedEntity] => ResourceId
@@ -49,14 +48,8 @@ object Dao {
 
 }
 
-case class Repository(tableName: String,
-                      resourceMappings: Vector[IdMapping])
+case class Repository(tableName: String)
                      (executor: ULayer[DynamoDBExecutor]) {
-
-  def save(entity: MappedEntity): ZIO[Any, Throwable, Option[Item]] = {
-    val attrMap: AttrMap = toAttrMap(entity, System.currentTimeMillis())
-    DynamoDBQuery.putItem(tableName, attrMap).execute.provideLayer(executor)
-  }
 
   def saveTyped[T: ProcessedSchemaTyped](value: T): ZIO[Any, Throwable, Option[Item]] = {
     val attrs = implicitly[ProcessedSchemaTyped[T]].toAttrMap(value)
@@ -101,8 +94,9 @@ case class Repository(tableName: String,
     val prefix = proc.resourcePrefix
 
     for {
-      x <- DynamoDBQuery.scanSomeItem(tableName, 10) //todo: figure out why querySomeItems does not work - is there a difference in projections
-        .where($("gsi_pk1") === prefix)
+      x <- DynamoDBQuery.querySomeItem(tableName, 10) //todo: figure out why querySomeItems does not work - is there a difference in projections
+        .whereKey($("gsi_pk1").partitionKey === prefix)
+        .indexName("gsi1")
         .execute.provideLayer(executor)
     } yield x._1.map { item =>
       implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
@@ -114,12 +108,28 @@ case class Repository(tableName: String,
     val prefix = proc.resourcePrefix
 
     val query = DynamoDBQuery.querySomeItem(tableName, 10)
-      .whereKey($("gsi_pk1").partitionKey === prefix && $("gsi_sk1").sortKey.beginsWith())
+      .indexName("gsi1")
+      .whereKey($("gsi_pk1").partitionKey === prefix && $("gsi_sk1").sortKey.beginsWith(id))
 
     val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute.provideLayer(executor)
 
     x.map(_._1.headOption.map { item =>
       implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
+    })
+  }
+
+  def readHistory[T: ProcessedSchemaTyped](id: String): ZIO[Any, Throwable, List[(T, Timestamp)]] = {
+    val proc = implicitly[ProcessedSchemaTyped[T]]
+    val prefix = proc.resourcePrefix
+
+    val query = DynamoDBQuery.querySomeItem(tableName, 10)
+      .indexName("gsi1")
+      .whereKey($("gsi_pk1").partitionKey === prefix && $("gsi_sk1").sortKey.beginsWith(id))
+
+    val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute.provideLayer(executor)
+
+    x.map(_._1.toList.map { item =>
+      implicitly[ProcessedSchemaTyped[T]].fromAttrMapWithTimestamp(item)
     })
   }
 
@@ -137,38 +147,5 @@ case class Repository(tableName: String,
     })
   }
 
-  def fetchHistory(parentId: Resource, resource: Resource): ZIO[Any, Throwable, List[Item]] = {
-    val pkValue = parentId.flatPrefix
-    val sortPrefix = resource.flatPrefix
-    val query = DynamoDBQuery.querySomeItem(tableName, 10)
-      .whereKey($("pk").partitionKey === pkValue && $("sk").sortKey.beginsWith(sortPrefix))
-
-    val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute.provideLayer(executor)
-
-    x.map(_._1.toList)
-  }
-
-  def fetch(parentId: Resource, resource: Resource): ZIO[Any, Throwable, Option[Item]] = {
-    val pkValue = parentId.flatPrefix
-    val sortPrefix = resource.flatPrefix
-    val query = DynamoDBQuery.querySomeItem(tableName, 10)
-      .whereKey($("pk").partitionKey === pkValue && $("sk").sortKey === sortPrefix)
-
-    query.execute.provideLayer(executor).map(_._1.headOption)
-  }
-
-  private def toAttrMap(entity: MappedEntity, millis: Long) = {
-    val attributes : Map[String, AttributeValue] = Map(
-      "pk" -> AttributeValue(entity.parent.map(_.resourcePrefix.value).getOrElse("no_resource_type") + "#" + entity.parent.map(_.id.value).getOrElse("missing_id")),
-      "sk" -> AttributeValue(entity.sk(millis)), // "voice_endpoint#123#123123123123",
-      "resourcePrefix" -> AttributeValue(entity.resourcePrefix.value),
-      "id" -> AttributeValue(entity.id.value)
-    )
-
-    val k = entity.fields.toList.map(f => f._1 -> f._2.toAttributeValue).toMap
-
-    val x = AttrMap(attributes ++ k)
-    x
-  }
 
 }

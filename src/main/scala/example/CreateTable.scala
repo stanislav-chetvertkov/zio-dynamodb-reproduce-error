@@ -24,6 +24,13 @@ object CreateTable {
         readCapacityUnit = 100,
         writeCapacityUnit = 100
       )
+//      .gsi(
+//        "gsi2",
+//        KeySchema(hashKey = "gsi_pk2", sortKey = "gsi_sk2"),
+//        ProjectionType.All,
+//        readCapacityUnit = 100,
+//        writeCapacityUnit = 100
+//      )
 
 
 }

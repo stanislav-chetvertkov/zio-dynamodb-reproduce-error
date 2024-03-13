@@ -1,15 +1,19 @@
 package example
 
 import zio.Chunk
-import zio.dynamodb.SchemaUtils.Timestamp
+import zio.dynamodb.SchemaUtils.{Timestamp, Version}
 import zio.dynamodb.{AttrMap, AttributeValue, Codec, Decoder, SchemaUtils}
 import zio.schema.{DynamicValue, Schema, TypeId}
-
+import zio.dynamodb.{AttrMap, AttributeValue, Item, ProjectionExpression}
+import zio.schema.{DeriveSchema, DynamicValue, Schema}
 import java.time.Instant
 import scala.annotation.StaticAnnotation
 import scala.language.implicitConversions
 
 object SchemaParser {
+  val GSI_SK: String = "gsi_sk1"
+  val SK: String = "sk"
+  val TIMESTAMP = "timestamp"
 
   final case class resource_prefix(name: String) extends StaticAnnotation
   // uniquely identifies the record
@@ -41,13 +45,17 @@ object SchemaParser {
   // just a typed option to test things out
   trait ProcessedSchemaTyped [T] {
     def resourcePrefix: String
-    def toAttrMap(input: T): AttrMap
-    def fromAttrMapWithTimestamp(attrMap: AttrMap): (T, Timestamp)
+    def parentId(input: T): String
+    def resourceId(input: T): String
+    def toAttrMap(input: T): AttrMap = toAttrMap(input, 1)
+    def toAttrMap(input: T, version: Int, isHistory: Boolean = false): AttrMap
+    def fromAttrMapWithTimestamp(attrMap: AttrMap): (T, Version, Timestamp)
     def fromAttrMap(attrMap: AttrMap): T = fromAttrMapWithTimestamp(attrMap)._1
   }
 
   implicit def toProcessor[T](implicit schema: Schema[T]): ProcessedSchemaTyped[T] = validateTyped(schema)
 
+  // validates the schema to make sure if has the required annotations and returns a processor
   def validateTyped[T](schema: Schema[T]): ProcessedSchemaTyped[T] = {
     val record = schema match {
       case record: Schema.Record[_] => record
@@ -62,7 +70,7 @@ object SchemaParser {
     val otherFields = record.fields.filterNot(_.annotations.exists(_.isInstanceOf[id_field]))
 
     new ProcessedSchemaTyped[T] {
-      override def toAttrMap(input: T): AttrMap = {
+      def toAttrMap(input: T, version: Int, isHistoryRecord: Boolean = false): AttrMap = {
         val otherAttributes: Map[String, AttributeValue] = otherFields.map { field =>
           val value = field.get(input)
           val attrValue = value match {
@@ -75,20 +83,37 @@ object SchemaParser {
         }.toMap
 
         val now = Instant.now().toString
+        val id = idField.get(input)
         val attributes : Map[String, AttributeValue] = Map (
-          "sk" -> AttributeValue(resourcePrefix + "#" + idField.get(input) + "#" + now), //todo: add timestamp
+          SK -> {
+            if (isHistoryRecord) {
+              AttributeValue(resourcePrefix +  "#history#" + id + "#" + version)
+            } else {
+              AttributeValue(resourcePrefix + "#" + id)
+            }
+          },
           "pk" -> AttributeValue(parentField.get(input)),
           "gsi_pk1" -> AttributeValue(resourcePrefix),
-          "gsi_sk1" -> AttributeValue(idField.get(input) + "#" + now),
-          "timestamp" -> AttributeValue(now)
+          GSI_SK -> {
+            if (isHistoryRecord) {
+              // I'm not sure whether it's better to have version in the sort key or the timestamp
+              // the problem with version is that it has to be sortable that it means it should be padded with 0s on the left
+              // like 0001, 0002, 0003, etc otherwise it will be sorted as 1, 10, 11, 2, 3
+              // though It could be sorted on the client after receiving the data that adds additional work
+              AttributeValue("history#" + id + "#" + version)
+            } else {
+              AttributeValue(id + "#" + now)
+            }
+          },
+          TIMESTAMP -> AttributeValue(now),
+          "version" -> AttributeValue(version)
         ) ++ otherAttributes
 
         AttrMap(attributes)
       }
 
-      override def fromAttrMapWithTimestamp(attrMap: AttrMap): (T, Timestamp) = {
+      override def fromAttrMapWithTimestamp(attrMap: AttrMap): (T, Version, Timestamp) = {
         val params = attrMap.map.keys.map(k => SchemaUtils.attributeValueString(k) -> attrMap.map(k)).toMap
-
         schema match {
           case s @ Schema.CaseClass3(_, _, _, _, _, _) =>
             val attributeValueMap = SchemaUtils.attributeValueMap(params)
@@ -101,12 +126,13 @@ object SchemaParser {
               .apply(attributeValueMap)
               .getOrElse(throw new RuntimeException("Failed to parse"))
         }
-
       }
 
-      override def resourcePrefix: String = {
-        resourcePrefixValue
-      }
+      override def resourcePrefix: String = resourcePrefixValue
+
+      override def parentId(input: T): Timestamp = parentField.get(input)
+
+      override def resourceId(input: T): String = idField.get(input)
     }
 
 
@@ -124,12 +150,10 @@ object SchemaParser {
 
     val idField: Schema.Field[Any, String] = findIdField(record.fields).get
 
-    new SchemaProcessorForWrites {
-      override def toAttrMap(input: DynamicValue): AttrMap = {
-        val x = schema.fromDynamic(input).getOrElse(throw new RuntimeException("Failed to parse"))
-        val s: String = idField.get(x)
-        AttrMap("id" -> s)
-      }
+    (input: DynamicValue) => {
+      val x = schema.fromDynamic(input).getOrElse(throw new RuntimeException("Failed to parse"))
+      val s: String = idField.get(x)
+      AttrMap("id" -> s)
     }
   }
 

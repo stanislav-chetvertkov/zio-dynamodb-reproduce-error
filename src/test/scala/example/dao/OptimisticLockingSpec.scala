@@ -35,9 +35,6 @@ class OptimisticLockingSpec extends AnyFreeSpecLike with ScalaFutures with Match
                            capacity: Int,
                            @parent_field parent: String) // will keep it as a string for now
 
-
-
-
   implicit val voiceSchema: Schema[VoiceEndpoint] = DeriveSchema.gen
 
   "schema serialize with history=false" in {

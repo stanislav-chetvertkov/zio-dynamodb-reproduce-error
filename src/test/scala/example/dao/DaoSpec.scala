@@ -2,18 +2,15 @@ package example.dao
 
 import com.dimafeng.testcontainers.scalatest.TestContainerForEach
 import example.SchemaParser.{ProcessedSchemaTyped, id_field, indexed, parent_field, resource_prefix}
-import example.dao.Dao._
-import example.dao.untyped.UntypedRepository
 import example.{CreateTable, DynamoContainer, SchemaParser, WithDynamoDB}
 import org.scalatest.EitherValues
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.freespec.AnyFreeSpecLike
 import org.scalatest.matchers.must.Matchers
-import zio.dynamodb.{Item, ProjectionExpression}
+import zio.dynamodb.ProjectionExpression
 import zio.schema.{DeriveSchema, DynamicValue, Schema}
-import zio.{Exit, IO, Unsafe, ZLayer}
+import zio.{Exit, IO, Unsafe}
 
-import java.time.Instant
 import scala.concurrent.duration.DurationInt
 
 class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with EitherValues with TestContainerForEach with WithDynamoDB {
@@ -59,52 +56,6 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
   implicit val smsSchema: Schema[SmsEndpoint] = DeriveSchema.gen
   implicit val voiceSchema: Schema[VoiceEndpoint] = DeriveSchema.gen
 
-
-  //  "query resource by field"  in withDynamo { layer =>
-  //    CreateTable.createTableExample.execute.provide(layer).runUnsafe
-  //    val repo = Repository(tableName = CreateTable.TableName)(layer)
-  //
-  //    val mcc: ProjectionExpression[DlrErrorCodeMapping, String] = DlrErrorCodeMapping.mcc
-  //    mcc.elementAt()
-  //  }
-
-  "optimistic locking" in withDynamo { layer =>
-    CreateTable.createTableExample.execute.provide(layer).runUnsafe
-    val repo = Repository(tableName = CreateTable.TableName)(layer)
-    val voiceEndpoint = VoiceEndpoint(voice_id = "voice1", ip = "127.0.0.1", capacity = 10, parent = "provider#3")
-    val voiceEndpointV2 = voiceEndpoint.copy(capacity = 20)
-
-    val resp = repo.save(voiceEndpoint).runUnsafe
-
-    repo.save(voiceEndpoint.copy(capacity = 20), currentVersion = Some(1)).runUnsafe
-
-    repo.readHistory[VoiceEndpoint]("voice1").runUnsafe mustBe Some(voiceEndpoint)
-  }
-
-
-  "optimistic locking on writes" in withDynamo { layer =>
-    CreateTable.createTableExample.execute.provide(layer).runUnsafe
-    val repo = Repository(tableName = CreateTable.TableName)(layer)
-    val voiceEndpoint = VoiceEndpoint(voice_id = "voice1", ip = "127.0.0.1", capacity = 10, parent = "provider#3")
-    val voiceEndpoint2 = VoiceEndpoint(voice_id = "voice1", ip = "127.0.0.1", capacity = 20, parent = "provider#3")
-
-    repo.update(voiceEndpoint).runUnsafe
-    val hist1 = repo.readHistory[VoiceEndpoint]("voice1").runUnsafe
-
-    hist1.length mustBe 1
-    hist1.head._2 mustBe 1
-
-    val saveWithoutClashingVersion = repo.update(voiceEndpoint2, 1).runUnsafe
-    //      saveWithoutClashingVersion must not be(empty)
-
-    val x2 = repo.readHistory[VoiceEndpoint]("voice1").runUnsafe
-    x2.length mustBe 2
-
-    //      val saveWithUniqueVersion = repo.saveTypedOptimisticLoc(voiceEndpoint2, 2).runUnsafe
-    //      saveWithUniqueVersion must not be empty
-
-    //      repo.readHistory[VoiceEndpoint]("voice1").runUnsafe.length mustBe 2
-  }
 
   "get resource history by id (without parent)" in withDynamo { layer =>
     CreateTable.createTableExample.execute.provide(layer).runUnsafe
@@ -218,47 +169,6 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
     writer.toAttrMap(dynamic) mustBe Right(())
 
     smsSchema.fromDynamic(smsSchema.toDynamic(SmsEndpoint("1", "2", "3"))).toOption mustBe Some(SmsEndpoint("1", "2", "3"))
-  }
-
-  "test" in withDynamo { layer =>
-    CreateTable.createTableExample.execute.provide(layer).runUnsafe
-
-    val repo = UntypedRepository(tableName = CreateTable.TableName, Vector.empty)(layer)
-
-    val x = MappedEntity(ResourceType("voice_endpoint"), ResourceId("123"), Map.empty,
-      Some(MappedEntity(ResourceType("provider"), ResourceId("OT12323"), Map.empty, None)),
-    )
-
-    val saveResponse = repo.save(x).runUnsafe
-    print(saveResponse)
-
-    val fetchResponse: List[Item] = repo.fetchHistory(
-      parentId = Resource.fromValues("provider", "OT12323"),
-      resource = Resource.fromValues("voice_endpoint", "123")).provideLayer(ZLayer.succeed(zio.Scope.default)).runUnsafe
-
-    fetchResponse.length mustBe 1
-  }
-
-  "versions history" in withDynamo { layer =>
-    CreateTable.createTableExample.execute.provide(layer).runUnsafe
-    val repo = UntypedRepository(tableName = CreateTable.TableName, Vector.empty)(layer)
-
-    val initial = MappedEntity(ResourceType("voice_endpoint"), ResourceId("123"), Map("value" -> Field.StringField("v1")),
-      Some(MappedEntity(ResourceType("provider"), ResourceId("OT12323"), Map.empty, None)),
-    )
-
-    repo.save(initial).runUnsafe
-
-    val updated = MappedEntity(ResourceType("voice_endpoint"), ResourceId("123"), Map("value" -> Field.StringField("v2")),
-      Some(MappedEntity(ResourceType("provider"), ResourceId("OT12323"), Map.empty, None)),
-    )
-    repo.save(updated).runUnsafe
-
-    val fetchResponse = repo.fetchHistory(
-      parentId = Resource.fromValues("provider", "OT12323"),
-      resource = Resource.fromValues("voice_endpoint", "123")).provideLayer(ZLayer.succeed(zio.Scope.default)).runUnsafe
-
-    fetchResponse.length mustBe 2
   }
 
 }

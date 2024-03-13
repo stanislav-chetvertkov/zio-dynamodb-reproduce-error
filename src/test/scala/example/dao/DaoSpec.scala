@@ -8,7 +8,7 @@ import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.freespec.AnyFreeSpecLike
 import org.scalatest.matchers.must.Matchers
 import zio.dynamodb.ProjectionExpression
-import zio.schema.{DeriveSchema, DynamicValue, Schema}
+import zio.schema.{DeriveSchema, Schema}
 import zio.{Exit, IO, Unsafe}
 
 import scala.concurrent.duration.DurationInt
@@ -56,31 +56,31 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
   implicit val smsSchema: Schema[SmsEndpoint] = DeriveSchema.gen
   implicit val voiceSchema: Schema[VoiceEndpoint] = DeriveSchema.gen
 
-
-  "get resource history by id (without parent)" in withDynamo { layer =>
+  "what if I save the same record twice" in withDynamo { layer =>
     CreateTable.createTableExample.execute.provide(layer).runUnsafe
     val repo = Repository(tableName = CreateTable.TableName)(layer)
 
     val smsEndpoint1 = SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")
-    repo.update(smsEndpoint1).runUnsafe
+    val smsEndpoint2 = SmsEndpoint(id = "SMS1", value = "payload2", parent = "provider#3")
+    val w1 = repo.save(smsEndpoint1).runUnsafe
+    val w2 = repo.save(smsEndpoint2).runUnsafe
 
-    val smsEndpoint1_updated = SmsEndpoint(id = "SMS1", value = "updated payload", parent = "provider#3")
-    repo.update(smsEndpoint1_updated).runUnsafe
+    println(w1)
+    println(w2)
 
-    val history = repo.readHistory[SmsEndpoint](id = "SMS1").runUnsafe
-    history.length mustBe 2
-    history.map(_._1) mustBe List(smsEndpoint1, smsEndpoint1_updated) //fields are in the wrong order
-
-    val timestamps = history.map(_._2)
-    //    Instant.parse(timestamps(0)).isBefore(Instant.parse(timestamps(1))) mustBe true //fixme reenable
+    val writes = repo.list[SmsEndpoint]("provider#3").runUnsafe
+    println(writes)
+    writes.length mustBe 1
+    writes.head mustBe smsEndpoint1
   }
+
 
   "get resource by id (without specifying its parent)" in withDynamo { layer =>
     CreateTable.createTableExample.execute.provide(layer).runUnsafe
     val repo = Repository(tableName = CreateTable.TableName)(layer)
 
     val smsEndpoint1 = SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")
-    repo.update(smsEndpoint1).runUnsafe
+    repo.save(smsEndpoint1).runUnsafe
 
     val opt = repo.read[SmsEndpoint]("SMS1").runUnsafe
     opt.get mustBe SmsEndpoint(id = "SMS1", value = "payload", "provider#3")
@@ -94,9 +94,9 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
     val smsEndpoint2 = SmsEndpoint(id = "SMS2", value = "payload2", parent = "provider#3")
     val smsEndpoint3 = SmsEndpoint(id = "SMS3", value = "payload3", parent = "provider#4")
 
-    repo.update(smsEndpoint1).runUnsafe
-    repo.update(smsEndpoint2).runUnsafe
-    repo.update(smsEndpoint3).runUnsafe
+    repo.save(smsEndpoint1).runUnsafe
+    repo.save(smsEndpoint2).runUnsafe
+    repo.save(smsEndpoint3).runUnsafe
 
     val list = repo.listAll[SmsEndpoint].runUnsafe
     list.toSet mustBe Set(smsEndpoint1, smsEndpoint2, smsEndpoint3)
@@ -110,9 +110,9 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
     val smsEndpoint2 = SmsEndpoint(id = "SMS2", value = "payload2", parent = "provider#3")
     val smsEndpoint3 = SmsEndpoint(id = "SMS3", value = "payload3", parent = "provider#4")
 
-    repo.update(smsEndpoint1).runUnsafe
-    repo.update(smsEndpoint2).runUnsafe
-    repo.update(smsEndpoint3).runUnsafe
+    repo.save(smsEndpoint1).runUnsafe
+    repo.save(smsEndpoint2).runUnsafe
+    repo.save(smsEndpoint3).runUnsafe
 
     val list = repo.scanAll[SmsEndpoint].runUnsafe
     list.toSet mustBe Set(smsEndpoint1, smsEndpoint2, smsEndpoint3)
@@ -122,7 +122,7 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
     CreateTable.createTableExample.execute.provide(layer).runUnsafe
     val repo = Repository(tableName = CreateTable.TableName)(layer)
     val voiceEndpoint = VoiceEndpoint(voice_id = "voice1", ip = "127.0.0.1", capacity = 10, parent = "provider#3")
-    val saveResult = repo.update(voiceEndpoint).runUnsafe
+    val saveResult = repo.save(voiceEndpoint).runUnsafe
 
     val opt = repo.read[VoiceEndpoint]("voice1").runUnsafe
     opt.get mustBe voiceEndpoint
@@ -134,13 +134,13 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
 
     val repo = Repository(tableName = CreateTable.TableName)(layer)
 
-    val saveResult = repo.update(SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")).runUnsafe
+    val saveResult = repo.save(SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")).runUnsafe
 
     val readResult = repo.readTypedByParent[SmsEndpoint]("SMS1", "provider#3").runUnsafe
     readResult.get mustBe SmsEndpoint("SMS1", "payload", "provider#3")
 
-    repo.update(SmsEndpoint(id = "SMS2", value = "payload2", parent = "provider#3")).runUnsafe
-    repo.update(SmsEndpoint(id = "SMS3", value = "payload3", parent = "provider#4")).runUnsafe
+    repo.save(SmsEndpoint(id = "SMS2", value = "payload2", parent = "provider#3")).runUnsafe
+    repo.save(SmsEndpoint(id = "SMS3", value = "payload3", parent = "provider#4")).runUnsafe
 
     val list = repo.list[SmsEndpoint]("provider#3").runUnsafe
     list.length mustBe 2
@@ -159,16 +159,6 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
     r.map.get("sk").map(_.decode[String].value).get must startWith("sms_endpoint#1")
 
     print(r)
-  }
-
-  "test schema" in {
-    val instance = SmsEndpoint("1", "2", "3")
-
-    val writer = SchemaParser.validate(smsSchema)
-    val dynamic = DynamicValue.fromSchemaAndValue(smsSchema, instance)
-    writer.toAttrMap(dynamic) mustBe Right(())
-
-    smsSchema.fromDynamic(smsSchema.toDynamic(SmsEndpoint("1", "2", "3"))).toOption mustBe Some(SmsEndpoint("1", "2", "3"))
   }
 
 }

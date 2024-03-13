@@ -1,22 +1,18 @@
 package zio.dynamodb
 
-import example.SchemaParser.id_field
+import example.SchemaParser.{SEPARATOR, SK, id_field}
 import zio.dynamodb.Codec.Decoder.{ContainerField, decoder}
-import zio.dynamodb.DynamoDBError.DecodingError
+import zio.dynamodb.DynamoDBError.ItemError.DecodingError
 import zio.prelude.ForEachOps
 import zio.schema.Schema
 
 object SchemaUtils {
-
   type Timestamp = String
   type Version = Int
 
-  def attributeValueMap(input: Map[AttributeValue.String, AttributeValue]): AttributeValue.Map =
-    AttributeValue.Map(input)
+  def attributeValueMap(input: Map[AttributeValue.String, AttributeValue]): AttributeValue.Map = AttributeValue.Map(input)
 
-  def attributeValueString(input: String): AttributeValue.String =
-    AttributeValue.String(input)
-
+  def attributeValueString(input: String): AttributeValue.String = AttributeValue.String(input)
 
   type DecoderWithTimeStamp[+A] = AttributeValue => Either[DynamoDBError, (A, Version, Timestamp)]
 
@@ -46,14 +42,14 @@ object SchemaUtils {
         val myVar = fields.toList.forEach {
           case Schema.Field(key, schema, annotations, _, _, _) =>
             if (annotations.exists(_.isInstanceOf[id_field])) {
-              val maybeValue: Option[AttributeValue] = map.get(AttributeValue.String("sk"))
+              val maybeValue: Option[AttributeValue] = map.get(AttributeValue.String(SK))
               val r = maybeValue.get match {
                 case AttributeValue.String(value) =>
-                  value.split("#").toList match {
-                    case prefix :: "history" :: id :: tail => // history subsection
-                      Some(id).toRight(DecodingError("field 'sk' not found in $av"))
+                  value.split(SEPARATOR).toList match {
+                    case "history" :: prefix :: id :: tail => // history subsection
+                      Some(id).toRight(DecodingError(s"field 'sk' not found in $av"))
                     case prefix :: id :: tail =>
-                      Some(id).toRight(DecodingError("field 'sk' not found in $av"))
+                      Some(id).toRight(DecodingError(s"field 'sk' not found in $av"))
                     case _ => Left(DecodingError(s"field 'sk' not found in $av"))
                   }
                 case _ => Left(DecodingError(s"field 'sk' not found in $av"))
@@ -76,6 +72,7 @@ object SchemaUtils {
               val dec = decoder(schema)
               val maybeValue = map.get(AttributeValue.String(key))
               val maybeDecoder = maybeValue.map(dec).toRight(DecodingError(s"field '$key' not found in $av"))
+
               val either: Either[DynamoDBError, Any] = for {
                 decoder <- maybeDecoder
                 decoded <- decoder

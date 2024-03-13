@@ -14,6 +14,8 @@ object SchemaParser {
   val GSI_SK: String = "gsi_sk1"
   val SK: String = "sk"
   val TIMESTAMP = "timestamp"
+  val SEPARATOR = "#"
+  val HISTORY = "history"
 
   final case class resource_prefix(name: String) extends StaticAnnotation
   // uniquely identifies the record
@@ -87,7 +89,8 @@ object SchemaParser {
         val attributes : Map[String, AttributeValue] = Map (
           SK -> {
             if (isHistoryRecord) {
-              AttributeValue(resourcePrefix +  "#history#" + id + "#" + version)
+              val compositeKey = List(HISTORY, resourcePrefixValue, id, version).mkString(SEPARATOR)
+              AttributeValue(compositeKey)
             } else {
               AttributeValue(resourcePrefix + "#" + id)
             }
@@ -100,9 +103,11 @@ object SchemaParser {
               // the problem with version is that it has to be sortable that it means it should be padded with 0s on the left
               // like 0001, 0002, 0003, etc otherwise it will be sorted as 1, 10, 11, 2, 3
               // though It could be sorted on the client after receiving the data that adds additional work
-              AttributeValue("history#" + id + "#" + version)
+              val compositeKey = List(HISTORY, id, version).mkString(SEPARATOR)
+              AttributeValue(compositeKey)
             } else {
-              AttributeValue(id + "#" + now)
+              val compositeKey = List("values", id, now).mkString(SEPARATOR)
+              AttributeValue(compositeKey)
             }
           },
           TIMESTAMP -> AttributeValue(now),
@@ -119,12 +124,12 @@ object SchemaParser {
             val attributeValueMap = SchemaUtils.attributeValueMap(params)
             SchemaUtils.caseClass3Decoder(s)
               .apply(attributeValueMap)
-              .getOrElse(throw new RuntimeException("Failed to parse"))
+              .getOrElse(throw new RuntimeException(s"Failed to parse $params"))
           case s @ Schema.CaseClass4(_, _, _, _, _, _, _) =>
             val attributeValueMap = SchemaUtils.attributeValueMap(params)
             SchemaUtils.caseClass4Decoder(s)
               .apply(attributeValueMap)
-              .getOrElse(throw new RuntimeException("Failed to parse"))
+              .getOrElse(throw new RuntimeException(s"Failed to parse $params"))
         }
       }
 

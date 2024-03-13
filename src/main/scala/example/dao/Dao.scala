@@ -1,7 +1,8 @@
 package example.dao
 
-import example.SchemaParser.ProcessedSchemaTyped
+import example.SchemaParser.{ProcessedSchemaTyped, SEPARATOR}
 import software.amazon.awssdk.services.dynamodb.model.TransactionCanceledException
+import zio.dynamodb.DynamoDBError.AWSError
 import zio.dynamodb.ProjectionExpression.$
 import zio.dynamodb.SchemaUtils.{Timestamp, Version}
 import zio.{Chunk, ULayer, ZIO, stream}
@@ -56,17 +57,18 @@ object Dao {
 case class Repository(tableName: String)
                      (executor: ULayer[DynamoDBExecutor]) {
 
-  def listAll() = {
+  def listAll(): ZIO[Any, DynamoDBError, stream.Stream[Throwable, Item]] = {
     DynamoDBQuery.scanAllItem(tableName, ProjectionExpression.some).execute.provideLayer(executor)
   }
 
+  // I guess I'd need to maintain history in a separate sorting key structure
+  // on the initial write record 2 entries one with the current version and one history 'event'
   def save[T: Schema : ProcessedSchemaTyped](value: T, currentVersion: Option[Int] = None): ZIO[Any, Throwable, Option[Item]] = {
     val schemaProcessor = implicitly[ProcessedSchemaTyped[T]]
     val prefix = schemaProcessor.resourcePrefix
     val parentId = schemaProcessor.parentId(value)
 
     val id = schemaProcessor.resourceId(value)
-
 
     val query = currentVersion match {
       case Some(version) =>
@@ -83,51 +85,24 @@ case class Repository(tableName: String)
         val attrs = schemaProcessor.toAttrMap(value, 1)
         val attrsHistoric = schemaProcessor.toAttrMap(value, 1, isHistory = true) //write to history sk
 
-        DynamoDBQuery.putItem(tableName, attrsHistoric).zipRight(
-          DynamoDBQuery.putItem(tableName, attrs)
-        ).transaction.execute.provideLayer(executor)
+        DynamoDBQuery.putItem(tableName, attrsHistoric)
+          .zipRight(
+            DynamoDBQuery.putItem(tableName, attrs).where($("version").notExists)
+          )
+        .transaction.execute.provideLayer(executor)
     }
 
     query.catchAll({
-      case e: TransactionCanceledException =>
+      case e@DynamoDBError.AWSError(th) if th.toString.contains("TransactionCanceledException") =>
         ZIO.logWarning(s"Transaction cancelled for $e") *>
           ZIO.none
-      case other => ZIO.fail(other)
+      case other =>
+        ZIO.fail(other)
     })
   }
 
-  // I guess I'd need to maintain history in a separate sorting key structure
-  // on the initial write record 2 entries one with the current version and one history 'event'
   // resource_type#id with 'version' column
   // resource_type#history#id#timestamp
-
-  def update[T: Schema : ProcessedSchemaTyped](value: T, currentVersion: Int = 1): ZIO[Any, Throwable, Option[Item]]
-  = {
-    val schemaProcessor = implicitly[ProcessedSchemaTyped[T]]
-    val prefix = schemaProcessor.resourcePrefix
-    val parentId = schemaProcessor.parentId(value)
-    val attrs = schemaProcessor.toAttrMap(value)
-    val id = schemaProcessor.resourceId(value)
-
-
-    val putItem: ZIO[Any, Throwable, Option[Item]] = DynamoDBQuery.updateItem(
-        tableName,
-        PrimaryKey("pk" -> parentId, "sk" -> s"$prefix#$id#$currentVersion"),
-      ) {
-        $("version").set(currentVersion + 1)
-
-      }
-      .where($("version") === s"$currentVersion").transaction.execute.provideLayer(executor)
-
-    putItem.catchAll({
-      case e: TransactionCanceledException =>
-        ZIO.logWarning(s"Transaction cancelled for $e") *>
-          ZIO.none
-      case other => ZIO.fail(other)
-    })
-
-  }
-
 
   private val ChunkSize = 10
 
@@ -151,6 +126,7 @@ case class Repository(tableName: String)
     })
   }
 
+  // list resource items by parent
   def list[T: ProcessedSchemaTyped](parent: String): ZIO[Any, Throwable, Chunk[T]] = {
     val proc = implicitly[ProcessedSchemaTyped[T]]
     val prefix = proc.resourcePrefix
@@ -160,18 +136,22 @@ case class Repository(tableName: String)
 
     val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute.provideLayer(executor)
 
-    x.map(_._1.map { item =>
-      implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
+    val result: ZIO[Any, Throwable, Chunk[T]] = x.map(_._1.map { item =>
+      proc.fromAttrMap(item)
     })
+
+    //todo: filter out history items
+    result
   }
 
+  // uses GSI
   def listAll[T: ProcessedSchemaTyped]: ZIO[Any, Throwable, Chunk[T]] = {
     val proc = implicitly[ProcessedSchemaTyped[T]]
     val prefix = proc.resourcePrefix
 
     for {
       x <- DynamoDBQuery.querySomeItem(tableName, ChunkSize) //todo: figure out why querySomeItems does not work - is there a difference in projections
-        .whereKey($("gsi_pk1").partitionKey === prefix)
+        .whereKey($("gsi_pk1").partitionKey === prefix && $("gsi_sk1").sortKey.beginsWith("values" + SEPARATOR))
         .indexName("gsi1")
         .execute.provideLayer(executor)
     } yield x._1.map { item =>
@@ -179,13 +159,14 @@ case class Repository(tableName: String)
     }
   }
 
+  // read by resource id (without specifying the parent)
   def read[T: ProcessedSchemaTyped](id: String): ZIO[Any, Throwable, Option[T]] = {
     val proc = implicitly[ProcessedSchemaTyped[T]]
     val prefix = proc.resourcePrefix
 
     val query = DynamoDBQuery.querySomeItem(tableName, ChunkSize)
       .indexName("gsi1")
-      .whereKey($("gsi_pk1").partitionKey === prefix && $("gsi_sk1").sortKey.beginsWith(id))
+      .whereKey($("gsi_pk1").partitionKey === prefix && $("gsi_sk1").sortKey.beginsWith("values#" + id))
 
     val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute.provideLayer(executor)
 
@@ -218,10 +199,10 @@ case class Repository(tableName: String)
 
     val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute.provideLayer(executor)
 
-    x.map(_._1.headOption.map { item =>
+    val result: ZIO[Any, Throwable, Option[T]] = x.map(_._1.headOption.map { item =>
       implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
     })
+
+    result
   }
-
-
 }

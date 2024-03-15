@@ -102,7 +102,7 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
     list.toSet mustBe Set(smsEndpoint1, smsEndpoint2, smsEndpoint3)
   }
 
-  "scan all resource" in withDynamo { layer =>
+  "list all resource" in withDynamo { layer =>
     CreateTable.createTableExample.execute.provide(layer).runUnsafe
     val repo = Repository(tableName = CreateTable.TableName)(layer)
 
@@ -114,7 +114,7 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
     repo.save(smsEndpoint2).runUnsafe
     repo.save(smsEndpoint3).runUnsafe
 
-    val list = repo.scanAll[SmsEndpoint].runUnsafe
+    val list = repo.listAll[SmsEndpoint].runUnsafe
     list.toSet mustBe Set(smsEndpoint1, smsEndpoint2, smsEndpoint3)
   }
 

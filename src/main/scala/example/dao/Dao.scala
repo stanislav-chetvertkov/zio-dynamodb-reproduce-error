@@ -89,7 +89,7 @@ case class Repository(tableName: String)
           .zipRight(
             DynamoDBQuery.putItem(tableName, attrs).where($("version").notExists)
           )
-        .transaction.execute.provideLayer(executor)
+          .transaction.execute.provideLayer(executor)
     }
 
     query.catchAll({
@@ -131,17 +131,12 @@ case class Repository(tableName: String)
     val proc = implicitly[ProcessedSchemaTyped[T]]
     val prefix = proc.resourcePrefix
 
-    val query = DynamoDBQuery.querySomeItem(tableName, ChunkSize)
+    val query = DynamoDBQuery.queryAllItem(tableName)
       .whereKey($("pk").partitionKey === parent && $("sk").sortKey.beginsWith(prefix))
 
-    val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute.provideLayer(executor)
+    val items: ZIO[Any, Throwable, Chunk[Item]] = query.execute.flatMap(_.runCollect).provideLayer(executor)
 
-    val result: ZIO[Any, Throwable, Chunk[T]] = x.map(_._1.map { item =>
-      proc.fromAttrMap(item)
-    })
-
-    //todo: filter out history items
-    result
+    items.map(_.map { item => proc.fromAttrMap(item) })
   }
 
   // uses GSI
@@ -150,11 +145,11 @@ case class Repository(tableName: String)
     val prefix = proc.resourcePrefix
 
     for {
-      x <- DynamoDBQuery.querySomeItem(tableName, ChunkSize) //todo: figure out why querySomeItems does not work - is there a difference in projections
+      x <- DynamoDBQuery.queryAllItem(tableName) //todo: figure out why querySomeItems does not work - is there a difference in projections
         .whereKey($("gsi_pk1").partitionKey === prefix && $("gsi_sk1").sortKey.beginsWith("values" + SEPARATOR))
         .indexName("gsi1")
-        .execute.provideLayer(executor)
-    } yield x._1.map { item =>
+        .execute.flatMap(_.runCollect).provideLayer(executor)
+    } yield x.map { item =>
       implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
     }
   }
@@ -179,13 +174,13 @@ case class Repository(tableName: String)
     val proc = implicitly[ProcessedSchemaTyped[T]]
     val prefix = proc.resourcePrefix
 
-    val query = DynamoDBQuery.querySomeItem(tableName, ChunkSize)
+    val query = DynamoDBQuery.queryAllItem(tableName)
       .indexName("gsi1")
       .whereKey($("gsi_pk1").partitionKey === prefix && $("gsi_sk1").sortKey.beginsWith("history#" + id))
 
-    val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute.provideLayer(executor)
+    val x: ZIO[Any, Throwable, Chunk[Item]] = query.execute.flatMap(_.runCollect).provideLayer(executor)
 
-    x.map(_._1.toList.map { item =>
+    x.map(_.toList.map { item =>
       implicitly[ProcessedSchemaTyped[T]].fromAttrMapWithTimestamp(item)
     })
   }

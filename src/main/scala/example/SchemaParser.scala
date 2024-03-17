@@ -97,7 +97,7 @@ object SchemaParser {
               val compositeKey = List(HISTORY, resourcePrefixValue, id, version).mkString(SEPARATOR)
               AttributeValue(compositeKey)
             } else {
-              AttributeValue(resourcePrefix + "#" + id)
+              AttributeValue(resourcePrefix + SEPARATOR + id)
             }
           },
           "pk" -> AttributeValue(parentField.get(input)),

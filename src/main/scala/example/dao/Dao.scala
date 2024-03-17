@@ -1,6 +1,6 @@
 package example.dao
 
-import example.SchemaParser.{ProcessedSchemaTyped, SEPARATOR}
+import example.SchemaParser.{GSI_INDEX_NAME, GSI_PK, GSI_SK, GSI_VALUES_PREFIX, PK, ProcessedSchemaTyped, SEPARATOR, SK}
 import software.amazon.awssdk.services.dynamodb.model.TransactionCanceledException
 import zio.dynamodb.DynamoDBError.AWSError
 import zio.dynamodb.ProjectionExpression.$
@@ -57,10 +57,6 @@ object Dao {
 case class Repository(tableName: String)
                      (executor: ULayer[DynamoDBExecutor]) {
 
-  def listAll(): ZIO[Any, DynamoDBError, stream.Stream[Throwable, Item]] = {
-    DynamoDBQuery.scanAllItem(tableName, ProjectionExpression.some).execute.provideLayer(executor)
-  }
-
   // I guess I'd need to maintain history in a separate sorting key structure
   // on the initial write record 2 entries one with the current version and one history 'event'
   def save[T: Schema : ProcessedSchemaTyped](value: T, currentVersion: Option[Int] = None): ZIO[Any, Throwable, Option[Item]] = {
@@ -106,33 +102,13 @@ case class Repository(tableName: String)
 
   private val ChunkSize = 10
 
-  /**
-   * we can either have a slow version that fetches all the items and then filters them by the sort key prefix
-   * or use GSI
-   *
-   * @tparam T
-   * @return
-   */
-  def scanAll[T: ProcessedSchemaTyped]: ZIO[Any, Throwable, Chunk[T]] = {
-    val proc = implicitly[ProcessedSchemaTyped[T]]
-    val prefix = proc.resourcePrefix
-
-    val x = DynamoDBQuery.scanSomeItem(tableName, ChunkSize)
-      .where($("sk").beginsWith(prefix))
-      .execute.provideLayer(executor)
-
-    x.map(_._1.map { item =>
-      implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
-    })
-  }
-
   // list resource items by parent
   def list[T: ProcessedSchemaTyped](parent: String): ZIO[Any, Throwable, Chunk[T]] = {
     val proc = implicitly[ProcessedSchemaTyped[T]]
     val prefix = proc.resourcePrefix
 
     val query = DynamoDBQuery.queryAllItem(tableName)
-      .whereKey($("pk").partitionKey === parent && $("sk").sortKey.beginsWith(prefix))
+      .whereKey($(PK).partitionKey === parent && $(SK).sortKey.beginsWith(prefix))
 
     val items: ZIO[Any, Throwable, Chunk[Item]] = query.execute.flatMap(_.runCollect).provideLayer(executor)
 
@@ -146,8 +122,8 @@ case class Repository(tableName: String)
 
     for {
       x <- DynamoDBQuery.queryAllItem(tableName) //todo: figure out why querySomeItems does not work - is there a difference in projections
-        .whereKey($("gsi_pk1").partitionKey === prefix && $("gsi_sk1").sortKey.beginsWith("values" + SEPARATOR))
-        .indexName("gsi1")
+        .whereKey($(GSI_PK).partitionKey === prefix && $(GSI_SK).sortKey.beginsWith(GSI_VALUES_PREFIX + SEPARATOR))
+        .indexName(GSI_INDEX_NAME)
         .execute.flatMap(_.runCollect).provideLayer(executor)
     } yield x.map { item =>
       implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
@@ -160,7 +136,7 @@ case class Repository(tableName: String)
     val prefix = proc.resourcePrefix
 
     val query = DynamoDBQuery.querySomeItem(tableName, ChunkSize)
-      .indexName("gsi1")
+      .indexName(GSI_INDEX_NAME)
       .whereKey($("gsi_pk1").partitionKey === prefix && $("gsi_sk1").sortKey.beginsWith("values#" + id))
 
     val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute.provideLayer(executor)
@@ -175,7 +151,7 @@ case class Repository(tableName: String)
     val prefix = proc.resourcePrefix
 
     val query = DynamoDBQuery.queryAllItem(tableName)
-      .indexName("gsi1")
+      .indexName(GSI_INDEX_NAME)
       .whereKey($("gsi_pk1").partitionKey === prefix && $("gsi_sk1").sortKey.beginsWith("history#" + id))
 
     val x: ZIO[Any, Throwable, Chunk[Item]] = query.execute.flatMap(_.runCollect).provideLayer(executor)
@@ -190,7 +166,7 @@ case class Repository(tableName: String)
     val prefix = proc.resourcePrefix
 
     val query = DynamoDBQuery.querySomeItem(tableName, ChunkSize)
-      .whereKey($("pk").partitionKey === parent && $("sk").sortKey.beginsWith(prefix + "#" + id))
+      .whereKey($(PK).partitionKey === parent && $(SK).sortKey.beginsWith(prefix + "#" + id))
 
     val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute.provideLayer(executor)
 

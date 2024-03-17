@@ -12,10 +12,15 @@ import scala.language.implicitConversions
 
 object SchemaParser {
   val GSI_SK: String = "gsi_sk1"
+  val GSI_PK: String = "gsi_pk1"
+  val PK: String = "pk"
   val SK: String = "sk"
   val TIMESTAMP = "timestamp"
   val SEPARATOR = "#"
   val HISTORY = "history"
+  val GSI_VALUES_PREFIX = "values"
+
+  val GSI_INDEX_NAME = "gsi1"
 
   final case class resource_prefix(name: String) extends StaticAnnotation
   // uniquely identifies the record

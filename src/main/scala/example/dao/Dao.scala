@@ -1,12 +1,13 @@
 package example.dao
 
-import example.SchemaParser.{GSI_INDEX_NAME, GSI_PK, GSI_SK, GSI_VALUES_PREFIX, PK, ProcessedSchemaTyped, SEPARATOR, SK}
+import example.SchemaParser.{GSI_INDEX_NAME, GSI_PK, GSI_SK, GSI_VALUES_PREFIX, PK, ProcessedSchemaTyped, SEPARATOR, SK, indexed}
 import software.amazon.awssdk.services.dynamodb.model.TransactionCanceledException
 import zio.dynamodb.DynamoDBError.AWSError
 import zio.dynamodb.ProjectionExpression.$
 import zio.dynamodb.SchemaUtils.{Timestamp, Version}
+import zio.dynamodb.proofs.CanWhere
 import zio.{Chunk, ULayer, ZIO, stream}
-import zio.dynamodb.{AttrMap, AttributeValue, DynamoDBError, DynamoDBExecutor, DynamoDBQuery, Item, KeyConditionExpr, LastEvaluatedKey, PrimaryKey, ProjectionExpression, TableName, UpdateExpression}
+import zio.dynamodb.{AttrMap, AttributeValue, DynamoDBError, DynamoDBExecutor, DynamoDBQuery, Item, KeyConditionExpr, LastEvaluatedKey, PrimaryKey, ProjectionExpression, TableName, ToAttributeValue, UpdateExpression}
 import zio.schema.Schema
 
 object Dao {
@@ -56,6 +57,26 @@ object Dao {
 
 case class Repository(tableName: String)
                      (executor: ULayer[DynamoDBExecutor]) {
+
+  def queryByParameter[T: Schema : ProcessedSchemaTyped, A](partitionField: Schema.Field[T, A], value: A)
+                                                           (implicit t: ToAttributeValue[A])
+  : ZIO[Any, Throwable, List[T]] = {
+    val indexNameOpt = partitionField.annotations.collectFirst {
+      case i:indexed => i
+    }
+
+    val index = indexNameOpt.getOrElse(throw new RuntimeException(s"Column name not found for $partitionField"))
+
+    val query = DynamoDBQuery.queryAllItem(tableName) //todo:has to accomodate for history
+      .indexName(index.indexName)
+      .whereKey($(index.pkName).partitionKey === value && $(index.skName).sortKey === value)
+
+    val items: ZIO[Any, Throwable, Chunk[Item]] = query.execute.flatMap(_.runCollect).provideLayer(executor)
+    val proc = implicitly[ProcessedSchemaTyped[T]]
+    items.map(_.map { item =>
+      proc.fromAttrMap(item)
+    }.toList)
+  }
 
   // I guess I'd need to maintain history in a separate sorting key structure
   // on the initial write record 2 entries one with the current version and one history 'event'

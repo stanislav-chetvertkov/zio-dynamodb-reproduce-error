@@ -2,10 +2,9 @@ package example
 
 import zio.Chunk
 import zio.dynamodb.SchemaUtils.{Timestamp, Version}
-import zio.dynamodb.{AttrMap, AttributeValue, Codec, Decoder, SchemaUtils}
-import zio.schema.{DynamicValue, Schema, TypeId}
-import zio.dynamodb.{AttrMap, AttributeValue, Item, ProjectionExpression}
-import zio.schema.{DeriveSchema, DynamicValue, Schema}
+import zio.dynamodb.{AttrMap, AttributeValue, SchemaUtils}
+import zio.schema.{DynamicValue, Schema}
+
 import java.time.Instant
 import scala.annotation.StaticAnnotation
 import scala.language.implicitConversions
@@ -13,6 +12,8 @@ import scala.language.implicitConversions
 object SchemaParser {
   val GSI_SK: String = "gsi_sk1"
   val GSI_PK: String = "gsi_pk1"
+  val GSI_PK2: String = "gsi_pk2"
+  val GSI_SK2: String = "gsi_sk2"
   val PK: String = "pk"
   val SK: String = "sk"
   val TIMESTAMP = "timestamp"
@@ -21,42 +22,60 @@ object SchemaParser {
   val GSI_VALUES_PREFIX = "values"
 
   val GSI_INDEX_NAME = "gsi1"
+  val GSI_INDEX_NAME2 = "gsi2"
 
   final case class resource_prefix(name: String) extends StaticAnnotation
+
   // uniquely identifies the record
   final case class id_field() extends StaticAnnotation
+
   final case class parent_field() extends StaticAnnotation
+
 
   // means the field could be used in dynamo queries as a parameter
   // the value should correspond to the GSI name
-  final case class indexed(name: String) extends StaticAnnotation
+  //todo: needs to have the resource prefix and the field prefix
+  // actually the resource prefix is already available on the case class
+  // field prefix should be helpful, maybe it's worth spliting between pk and sk
+  // where pk is the resource prefix + field prefix and sk is the value
+  final case class indexed(indexName: String, pkName: String, skName: String) extends StaticAnnotation
 
   private def findIdField(fields: Chunk[Schema.Field[_, _]]): Option[Schema.Field[Any, String]] = {
     fields.find(_.annotations.exists(_.isInstanceOf[id_field]))
       .map(_.asInstanceOf[Schema.Field[Any, String]]) //todo: check if there is only one id field in the schema
   }
 
-  def findResourcePrefix(schema: Schema[_]): Option[String] = {
-    schema.annotations.collectFirst {
-      case resource_prefix(name) => name
-    }
+  private def findResourcePrefix(schema: Schema[_]): Option[String] = schema.annotations.collectFirst {
+    case resource_prefix(name) => name
   }
 
+  // collect fields that have indexed annotation
+  // return list of tuples (field, indexed)
+  private def findIndexedFields[T](fields: Chunk[Schema.Field[T, _]]): Chunk[(Schema.Field[T, _], indexed)] = {
+    val fieldsWithIndexed = fields.filter(_.annotations.exists(_.isInstanceOf[indexed]))
+      .map(field =>
+        (field, field.annotations.collectFirst {
+          case i:indexed => i
+        }.get)
+      )
 
-  trait SchemaProcessorForWrites {
-
-    // it actually could be more complicated than that (ie conditional expression) maybe multiple writes
-    def toAttrMap(input: DynamicValue): AttrMap
+    fieldsWithIndexed
   }
 
   // just a typed option to test things out
-  trait ProcessedSchemaTyped [T] {
+  trait ProcessedSchemaTyped[T] {
     def resourcePrefix: String
+
     def parentId(input: T): String
+
     def resourceId(input: T): String
+
     def toAttrMap(input: T): AttrMap = toAttrMap(input, 1)
+
     def toAttrMap(input: T, version: Int, isHistory: Boolean = false): AttrMap
+
     def fromAttrMapWithTimestamp(attrMap: AttrMap): (T, Version, Timestamp)
+
     def fromAttrMap(attrMap: AttrMap): T = fromAttrMapWithTimestamp(attrMap)._1
   }
 
@@ -78,6 +97,31 @@ object SchemaParser {
 
     new ProcessedSchemaTyped[T] {
       def toAttrMap(input: T, version: Int, isHistoryRecord: Boolean = false): AttrMap = {
+
+        //todo: write indexed fields
+        val indexed = if (!isHistoryRecord){
+          findIndexedFields(record.fields).map { case (field, indexed) =>
+            val attrValue: AttributeValue = field.get(input) match {
+              case s: String => AttributeValue(s)
+              case i: Int => AttributeValue(i)
+              case b: Boolean => AttributeValue(b)
+              case other => throw new RuntimeException(s"Unsupported type: $other")
+            }
+
+            val pkColumnName = indexed.pkName
+            val pkEntry = pkColumnName -> attrValue
+
+            val skColumnName = indexed.skName
+            val skEntry = skColumnName -> attrValue
+            println(pkEntry)
+            println(skEntry)
+            List(pkEntry, skEntry)
+          }.flatten.toMap
+        } else {
+          Map.empty[String, AttributeValue]
+        }
+
+
         val otherAttributes: Map[String, AttributeValue] = otherFields.map { field =>
           val value = field.get(input)
           val attrValue = value match {
@@ -91,7 +135,7 @@ object SchemaParser {
 
         val now = Instant.now().toString
         val id = idField.get(input)
-        val attributes : Map[String, AttributeValue] = Map (
+        val attributes: Map[String, AttributeValue] = Map(
           SK -> {
             if (isHistoryRecord) {
               val compositeKey = List(HISTORY, resourcePrefixValue, id, version).mkString(SEPARATOR)
@@ -117,7 +161,7 @@ object SchemaParser {
           },
           TIMESTAMP -> AttributeValue(now),
           "version" -> AttributeValue(version)
-        ) ++ otherAttributes
+        ) ++ otherAttributes ++ indexed
 
         AttrMap(attributes)
       }
@@ -125,12 +169,12 @@ object SchemaParser {
       override def fromAttrMapWithTimestamp(attrMap: AttrMap): (T, Version, Timestamp) = {
         val params = attrMap.map.keys.map(k => SchemaUtils.attributeValueString(k) -> attrMap.map(k)).toMap
         schema match {
-          case s @ Schema.CaseClass3(_, _, _, _, _, _) =>
+          case s@Schema.CaseClass3(_, _, _, _, _, _) =>
             val attributeValueMap = SchemaUtils.attributeValueMap(params)
             SchemaUtils.caseClass3Decoder(s)
               .apply(attributeValueMap)
               .getOrElse(throw new RuntimeException(s"Failed to parse $params"))
-          case s @ Schema.CaseClass4(_, _, _, _, _, _, _) =>
+          case s@Schema.CaseClass4(_, _, _, _, _, _, _) =>
             val attributeValueMap = SchemaUtils.attributeValueMap(params)
             SchemaUtils.caseClass4Decoder(s)
               .apply(attributeValueMap)
@@ -151,20 +195,8 @@ object SchemaParser {
   //a method that accepts schema
   // we return fields to access the fields
   // i need fields for accessing timestamp, sort key, and partition key
-  def validate(schema: Schema[_]): SchemaProcessorForWrites = {
-
-    val record = schema match {
-      case record: Schema.Record[_] => record
-      case other => throw new RuntimeException(s"Expected record, got $other")
-    }
-
-    val idField: Schema.Field[Any, String] = findIdField(record.fields).get
-
-    (input: DynamicValue) => {
-      val x = schema.fromDynamic(input).getOrElse(throw new RuntimeException("Failed to parse"))
-      val s: String = idField.get(x)
-      AttrMap("id" -> s)
-    }
+  def validate[T](schema: Schema[T]): ProcessedSchemaTyped[T] = {
+      ???
   }
 
 }

@@ -1,6 +1,7 @@
 package example
 
-import zio.dynamodb.AttributeDefinition._
+import example.SchemaParser.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2, PK, SK}
+import zio.dynamodb.AttributeDefinition.{attrDefnString, _}
 import zio.dynamodb.DynamoDBQuery.createTable
 import zio.dynamodb._
 
@@ -12,10 +13,12 @@ object CreateTable {
       keySchema = KeySchema(hashKey = "pk", sortKey = "sk"),
       BillingMode.provisioned(readCapacityUnit = 100, writeCapacityUnit = 100)
     )(
-      attrDefnString("pk"),
-      attrDefnString("sk"),
+      attrDefnString(PK),
+      attrDefnString(SK),
       attrDefnString("gsi_pk1"),
-      attrDefnString("gsi_sk1")
+      attrDefnString("gsi_sk1"),
+      attrDefnString(GSI_PK2), //the types have to be known at compile time
+      attrDefnString(GSI_SK2)
     )
       .gsi(
         "gsi1",
@@ -24,13 +27,13 @@ object CreateTable {
         readCapacityUnit = 100,
         writeCapacityUnit = 100
       )
-//      .gsi(
-//        "gsi2",
-//        KeySchema(hashKey = "gsi_pk2", sortKey = "gsi_sk2"),
-//        ProjectionType.All,
-//        readCapacityUnit = 100,
-//        writeCapacityUnit = 100
-//      )
+      .gsi(
+        GSI_INDEX_NAME2,
+        KeySchema(hashKey = GSI_PK2, sortKey = GSI_SK2),
+        ProjectionType.All,
+        readCapacityUnit = 100,
+        writeCapacityUnit = 100
+      )
 
 
 }

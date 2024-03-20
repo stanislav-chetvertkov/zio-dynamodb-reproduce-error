@@ -43,7 +43,7 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
 
   @resource_prefix("dlr")
   case class DlrErrorCodeMapping(@id_field id: String,
-                                 @indexed("gsi2") mcc: String,
+                                 mcc: String,
                                  errorCode: String,
                                  @parent_field parent: String)
 

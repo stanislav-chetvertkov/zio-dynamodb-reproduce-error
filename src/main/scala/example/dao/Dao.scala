@@ -6,7 +6,7 @@ import zio.dynamodb.DynamoDBError.AWSError
 import zio.dynamodb.ProjectionExpression.$
 import zio.dynamodb.SchemaUtils.{Timestamp, Version}
 import zio.dynamodb.proofs.CanWhere
-import zio.{Chunk, ULayer, ZIO, stream}
+import zio.{Chunk, ULayer, ZIO, ZLayer, stream}
 import zio.dynamodb.{AttrMap, AttributeValue, DynamoDBError, DynamoDBExecutor, DynamoDBQuery, Item, KeyConditionExpr, LastEvaluatedKey, PrimaryKey, ProjectionExpression, TableName, ToAttributeValue, UpdateExpression}
 import zio.schema.Schema
 
@@ -56,7 +56,7 @@ object Dao {
 }
 
 case class Repository(tableName: String)
-                     (executor: ULayer[DynamoDBExecutor]) {
+                     (executor: DynamoDBExecutor) {
 
   def queryByParameter[T: Schema : ProcessedSchemaTyped, A](partitionField: Schema.Field[T, A], value: A)
                                                            (implicit t: ToAttributeValue[A])
@@ -71,7 +71,8 @@ case class Repository(tableName: String)
       .indexName(index.indexName)
       .whereKey($(index.pkName).partitionKey === value && $(index.skName).sortKey === value)
 
-    val items: ZIO[Any, Throwable, Chunk[Item]] = query.execute.flatMap(_.runCollect).provideLayer(executor)
+    val items: ZIO[Any, Throwable, Chunk[Item]] = query.execute.flatMap(_.runCollect)
+      .provideLayer(ZLayer.succeed(executor))
     val proc = implicitly[ProcessedSchemaTyped[T]]
     items.map(_.map { item =>
       proc.fromAttrMap(item)
@@ -95,7 +96,7 @@ case class Repository(tableName: String)
 
         val putItem: ZIO[Any, Throwable, Option[Item]] = DynamoDBQuery.putItem(tableName, attrs)
           .where($("version") === currentVersion).zipRight(putHistoryItem)
-          .transaction.execute.provideLayer(executor)
+          .transaction.execute.provideLayer(ZLayer.succeed(executor))
         putItem
 
       case None =>
@@ -106,7 +107,7 @@ case class Repository(tableName: String)
           .zipRight(
             DynamoDBQuery.putItem(tableName, attrs).where($("version").notExists)
           )
-          .transaction.execute.provideLayer(executor)
+          .transaction.execute.provideLayer(ZLayer.succeed(executor))
     }
 
     query.catchAll({
@@ -131,7 +132,8 @@ case class Repository(tableName: String)
     val query = DynamoDBQuery.queryAllItem(tableName)
       .whereKey($(PK).partitionKey === parent && $(SK).sortKey.beginsWith(prefix))
 
-    val items: ZIO[Any, Throwable, Chunk[Item]] = query.execute.flatMap(_.runCollect).provideLayer(executor)
+    val items: ZIO[Any, Throwable, Chunk[Item]] = query.execute.flatMap(_.runCollect)
+      .provideLayer(ZLayer.succeed(executor))
 
     items.map(_.map { item => proc.fromAttrMap(item) })
   }
@@ -145,7 +147,8 @@ case class Repository(tableName: String)
       x <- DynamoDBQuery.queryAllItem(tableName) //todo: figure out why querySomeItems does not work - is there a difference in projections
         .whereKey($(GSI_PK).partitionKey === prefix && $(GSI_SK).sortKey.beginsWith(GSI_VALUES_PREFIX + SEPARATOR))
         .indexName(GSI_INDEX_NAME)
-        .execute.flatMap(_.runCollect).provideLayer(executor)
+        .execute.flatMap(_.runCollect)
+        .provideLayer(ZLayer.succeed(executor))
     } yield x.map { item =>
       implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
     }
@@ -160,7 +163,8 @@ case class Repository(tableName: String)
       .indexName(GSI_INDEX_NAME)
       .whereKey($("gsi_pk1").partitionKey === prefix && $("gsi_sk1").sortKey.beginsWith("values#" + id))
 
-    val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute.provideLayer(executor)
+    val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute
+      .provideLayer(ZLayer.succeed(executor))
 
     x.map(_._1.headOption.map { item =>
       implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
@@ -175,7 +179,8 @@ case class Repository(tableName: String)
       .indexName(GSI_INDEX_NAME)
       .whereKey($("gsi_pk1").partitionKey === prefix && $("gsi_sk1").sortKey.beginsWith("history#" + id))
 
-    val x: ZIO[Any, Throwable, Chunk[Item]] = query.execute.flatMap(_.runCollect).provideLayer(executor)
+    val x: ZIO[Any, Throwable, Chunk[Item]] = query.execute.flatMap(_.runCollect)
+      .provideLayer(ZLayer.succeed(executor))
 
     x.map(_.toList.map { item =>
       implicitly[ProcessedSchemaTyped[T]].fromAttrMapWithTimestamp(item)
@@ -189,7 +194,7 @@ case class Repository(tableName: String)
     val query = DynamoDBQuery.querySomeItem(tableName, ChunkSize)
       .whereKey($(PK).partitionKey === parent && $(SK).sortKey.beginsWith(prefix + "#" + id))
 
-    val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute.provideLayer(executor)
+    val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute.provideLayer(ZLayer.succeed(executor))
 
     val result: ZIO[Any, Throwable, Option[T]] = x.map(_._1.headOption.map { item =>
       implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)

@@ -121,7 +121,6 @@ object SchemaParser {
           Map.empty[String, AttributeValue]
         }
 
-
         val otherAttributes: Map[String, AttributeValue] = otherFields.map { field =>
           val value = field.get(input)
           val attrValue = value match {

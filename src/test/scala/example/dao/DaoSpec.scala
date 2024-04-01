@@ -19,17 +19,6 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
 
   override implicit val patienceConfig: PatienceConfig = PatienceConfig(1.seconds, 50.millis)
 
-  implicit class UnsafeOps[E, A](action: IO[E, A]) {
-    def runUnsafe: A = {
-      Unsafe.unsafe { implicit unsafe =>
-        zio.Runtime.default.unsafe.run(action) match {
-          case Exit.Success(value) => value
-          case Exit.Failure(cause) => throw new RuntimeException(cause.prettyPrint)
-        }
-      }
-    }
-  }
-
   @resource_prefix("sms_endpoint")
   case class SmsEndpoint(@id_field id: String,
                          value: String,
@@ -56,10 +45,7 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
   implicit val smsSchema: Schema[SmsEndpoint] = DeriveSchema.gen
   implicit val voiceSchema: Schema[VoiceEndpoint] = DeriveSchema.gen
 
-  "what if I save the same record twice" in withDynamo { layer =>
-    CreateTable.createTableExample.execute.provide(layer).runUnsafe
-    val repo = Repository(tableName = CreateTable.TableName)(layer)
-
+  "what if I save the same record twice" in withDynamoDao { repo =>
     val smsEndpoint1 = SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")
     val smsEndpoint2 = SmsEndpoint(id = "SMS1", value = "payload2", parent = "provider#3")
     val w1 = repo.save(smsEndpoint1).runUnsafe
@@ -75,9 +61,7 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
   }
 
 
-  "get resource by id (without specifying its parent)" in withDynamo { layer =>
-    CreateTable.createTableExample.execute.provide(layer).runUnsafe
-    val repo = Repository(tableName = CreateTable.TableName)(layer)
+  "get resource by id (without specifying its parent)" in withDynamoDao { repo =>
 
     val smsEndpoint1 = SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")
     repo.save(smsEndpoint1).runUnsafe
@@ -86,10 +70,7 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
     opt.get mustBe SmsEndpoint(id = "SMS1", value = "payload", "provider#3")
   }
 
-  "list all resource by type" in withDynamo { layer =>
-    CreateTable.createTableExample.execute.provide(layer).runUnsafe
-    val repo = Repository(tableName = CreateTable.TableName)(layer)
-
+  "list all resource by type" in withDynamoDao { repo =>
     val smsEndpoint1 = SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")
     val smsEndpoint2 = SmsEndpoint(id = "SMS2", value = "payload2", parent = "provider#3")
     val smsEndpoint3 = SmsEndpoint(id = "SMS3", value = "payload3", parent = "provider#4")
@@ -102,10 +83,7 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
     list.toSet mustBe Set(smsEndpoint1, smsEndpoint2, smsEndpoint3)
   }
 
-  "list all resource" in withDynamo { layer =>
-    CreateTable.createTableExample.execute.provide(layer).runUnsafe
-    val repo = Repository(tableName = CreateTable.TableName)(layer)
-
+  "list all resource" in withDynamoDao { repo =>
     val smsEndpoint1 = SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")
     val smsEndpoint2 = SmsEndpoint(id = "SMS2", value = "payload2", parent = "provider#3")
     val smsEndpoint3 = SmsEndpoint(id = "SMS3", value = "payload3", parent = "provider#4")
@@ -118,9 +96,7 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
     list.toSet mustBe Set(smsEndpoint1, smsEndpoint2, smsEndpoint3)
   }
 
-  "write typed schema (voice)" in withDynamo { layer =>
-    CreateTable.createTableExample.execute.provide(layer).runUnsafe
-    val repo = Repository(tableName = CreateTable.TableName)(layer)
+  "write typed schema (voice)" in withDynamoDao { repo =>
     val voiceEndpoint = VoiceEndpoint(voice_id = "voice1", ip = "127.0.0.1", capacity = 10, parent = "provider#3")
     val saveResult = repo.save(voiceEndpoint).runUnsafe
 
@@ -128,12 +104,8 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
     opt.get mustBe voiceEndpoint
   }
 
-  "write typed schema" in withDynamo { layer =>
-    CreateTable.createTableExample.execute.provide(layer).runUnsafe
+  "write typed schema" in withDynamoDao { repo =>
     implicit val schemaProcessor: ProcessedSchemaTyped[SmsEndpoint] = SchemaParser.validateTyped(smsSchema)
-
-    val repo = Repository(tableName = CreateTable.TableName)(layer)
-
     val saveResult = repo.save(SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")).runUnsafe
 
     val readResult = repo.readTypedByParent[SmsEndpoint]("SMS1", "provider#3").runUnsafe

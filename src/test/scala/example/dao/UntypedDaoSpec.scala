@@ -18,17 +18,6 @@ class UntypedDaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers wit
 
   override implicit val patienceConfig: PatienceConfig = PatienceConfig(1.seconds, 50.millis)
 
-  implicit class UnsafeOps[E, A](action: IO[E, A]) {
-    def runUnsafe: A = {
-      Unsafe.unsafe { implicit unsafe =>
-        zio.Runtime.default.unsafe.run(action) match {
-          case Exit.Success(value) => value
-          case Exit.Failure(cause) => throw new RuntimeException(cause.prettyPrint)
-        }
-      }
-    }
-  }
-
 //  "test" in withDynamo { layer =>
 //    CreateTable.createTableExample.execute.provide(layer).runUnsafe
 //

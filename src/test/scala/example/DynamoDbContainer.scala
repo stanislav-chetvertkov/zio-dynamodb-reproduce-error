@@ -3,12 +3,13 @@ package example
 import com.dimafeng.testcontainers.scalatest.{IllegalWithContainersCall, TestContainerForEach}
 import com.dimafeng.testcontainers.{ContainerDef, SingleContainer}
 import example.DynamoContainer.defaultDockerImageName
+import example.dao.Repository
 import org.testcontainers.utility.DockerImageName
 import software.amazon.awssdk.auth.credentials.{AwsBasicCredentials, StaticCredentialsProvider}
 import software.amazon.awssdk.endpoints.Endpoint
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient
-import zio.{ULayer, ZLayer}
+import zio.{Exit, IO, ULayer, Unsafe, ZLayer}
 import zio.aws.core.config.AwsConfig
 import zio.aws.dynamodb.DynamoDb
 import zio.aws.netty.NettyHttpClient
@@ -25,6 +26,7 @@ final case class DynamoContainer(dockerImageName: DockerImageName = DockerImageN
   }
 
   def client: DynamoDbClient = container.getClient
+
   def urlValue: Endpoint = container.urlValue
 
 }
@@ -45,6 +47,17 @@ object DynamoContainer {
 trait WithDynamoDB {
   self: TestContainerForEach =>
 
+  implicit class UnsafeOps[E, A](action: IO[E, A]) {
+    def runUnsafe: A = {
+      Unsafe.unsafe { implicit unsafe =>
+        zio.Runtime.default.unsafe.run(action) match {
+          case Exit.Success(value) => value
+          case Exit.Failure(cause) => throw new RuntimeException(cause.prettyPrint)
+        }
+      }
+    }
+  }
+
   override val containerDef: DynamoContainer.Def = DynamoContainer.Def()
 
   def createLayer(url: URI): ZLayer[Any, Nothing, DynamoDBExecutor] = {
@@ -59,8 +72,31 @@ trait WithDynamoDB {
     executorLayer.orDie
   }
 
+  def createLayer2(url: URI): DynamoDBExecutor = {
+    val dynLayer = DynamoDb.customized(
+      _.region(Region.US_EAST_1)
+        .endpointOverride(url)
+        .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("dummy", "dummy")))
+    )
+
+    val dynamoClientLayer = NettyHttpClient.default >>> AwsConfig.default >>> dynLayer
+    val executorLayer = dynamoClientLayer >>> DynamoDBExecutor.live
+    executorLayer.orDie.build(zio.Scope.global).runUnsafe.get
+  }
+
+  def withDynamoDao[A](runTest: Repository => A): A = {
+    withContainers { dyna =>
+      val executorLayer = createLayer2(dyna.urlValue.url())
+      CreateTable.createTableExample.execute.provide(ZLayer.succeed(executorLayer)).runUnsafe
+      val dao: Repository = Repository(CreateTable.TableName)(executorLayer)
+
+      runTest(dao)
+    }
+  }
+
+
   def withDynamo[A](runTest: ULayer[DynamoDBExecutor] => A): A = {
-    withContainers{dyna =>
+    withContainers { dyna =>
       val executorLayer = createLayer(dyna.urlValue.url())
       println(dyna.portBindings)
       runTest(executorLayer)

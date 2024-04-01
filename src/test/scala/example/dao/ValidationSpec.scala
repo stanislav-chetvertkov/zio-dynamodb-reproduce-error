@@ -2,7 +2,7 @@ package example.dao
 
 import com.dimafeng.testcontainers.scalatest.TestContainerForEach
 import example.SchemaParser.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2, id_field, indexed, parent_field, resource_prefix}
-import example.{CreateTable, DynamoContainer, WithDynamoDB}
+import example.{DynamoContainer, WithDynamoDB}
 import org.scalatest.EitherValues
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.freespec.AnyFreeSpecLike
@@ -11,7 +11,6 @@ import zio.dynamodb.ProjectionExpression
 import zio.schema.Schema.Field
 import zio.schema.Schema.Field.WithFieldName
 import zio.schema.{DeriveSchema, Schema}
-import zio.{Exit, IO, Unsafe}
 
 import scala.concurrent.duration.DurationInt
 
@@ -21,16 +20,7 @@ class ValidationSpec extends AnyFreeSpecLike with ScalaFutures with Matchers wit
 
   override implicit val patienceConfig: PatienceConfig = PatienceConfig(1.seconds, 50.millis)
 
-  implicit class UnsafeOps[E, A](action: IO[E, A]) {
-    def runUnsafe: A = {
-      Unsafe.unsafe { implicit unsafe =>
-        zio.Runtime.default.unsafe.run(action) match {
-          case Exit.Success(value) => value
-          case Exit.Failure(cause) => throw new RuntimeException(cause.prettyPrint)
-        }
-      }
-    }
-  }
+
 
   @resource_prefix("sms_endpoint")
   case class SmsEndpoint(@id_field id: String,
@@ -54,9 +44,7 @@ class ValidationSpec extends AnyFreeSpecLike with ScalaFutures with Matchers wit
     mnc.partitionKey
   }
 
-  "query by field" in withDynamo { layer =>
-    CreateTable.createTableExample.execute.provide(layer).runUnsafe
-    val repo = Repository(tableName = CreateTable.TableName)(layer)
+  "query by field" in withDynamoDao { repo =>
 
     val smsEndpoint1 = SmsEndpoint(id = "SMS1", mcc = "001", mnc = "123", parent = "provider#3")
     val smsEndpoint2 = SmsEndpoint(id = "SMS2", mcc = "002", mnc = "123", parent = "provider#4")

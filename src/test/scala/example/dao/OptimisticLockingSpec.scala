@@ -19,16 +19,6 @@ class OptimisticLockingSpec extends AnyFreeSpecLike with ScalaFutures with Match
 
   override implicit val patienceConfig: PatienceConfig = PatienceConfig(1.seconds, 50.millis)
 
-  implicit class UnsafeOps[E, A](action: IO[E, A]) {
-    def runUnsafe: A = {
-      Unsafe.unsafe { implicit unsafe =>
-        zio.Runtime.default.unsafe.run(action) match {
-          case Exit.Success(value) => value
-          case Exit.Failure(cause) => throw new RuntimeException(cause.prettyPrint)
-        }
-      }
-    }
-  }
   @resource_prefix("voice_endpoint")
   case class VoiceEndpoint(@id_field voice_id: String,
                            ip: String,
@@ -57,9 +47,7 @@ class OptimisticLockingSpec extends AnyFreeSpecLike with ScalaFutures with Match
     processor.fromAttrMap(props) mustBe voiceEndpoint
   }
 
-  "write should succeed when the version is consistent" in withDynamo { layer =>
-    CreateTable.createTableExample.execute.provide(layer).runUnsafe
-    val repo = Repository(tableName = CreateTable.TableName)(layer)
+  "write should succeed when the version is consistent" in withDynamoDao { repo =>
     val voiceEndpoint = VoiceEndpoint(voice_id = "voice1", ip = "127.0.0.1", capacity = 10, parent = "provider#3")
     val voiceEndpointV2 = voiceEndpoint.copy(capacity = 20)
     val voiceEndpointV3 = voiceEndpoint.copy(capacity = 30)
@@ -87,9 +75,7 @@ class OptimisticLockingSpec extends AnyFreeSpecLike with ScalaFutures with Match
     repo.read[VoiceEndpoint]("voice1").runUnsafe mustBe Some(voiceEndpointV3)
   }
 
-  "should fail when the version is inconsistent" in withDynamo { layer =>
-    CreateTable.createTableExample.execute.provide(layer).runUnsafe
-    val repo = Repository(tableName = CreateTable.TableName)(layer)
+  "should fail when the version is inconsistent" in withDynamoDao { repo =>
     val voiceEndpoint = VoiceEndpoint(voice_id = "voice1", ip = "127.0.0.1", capacity = 10, parent = "provider#3")
     val voiceEndpointV2 = voiceEndpoint.copy(capacity = 20)
     val voiceEndpointV3 = voiceEndpoint.copy(capacity = 30)

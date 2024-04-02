@@ -27,7 +27,8 @@ lazy val example = project
 //      "dev.zio" %% "zio" % "2.0.21",
       "dev.zio" %% "zio-schema-derivation" % "0.4.17",
       "dev.zio" %% "zio-dynamodb" % "1.0.0-RC2",
-      "dev.zio" %% "zio-http" % "3.0.0-RC4"
+      "dev.zio" %% "zio-http" % "3.0.0-RC4",
+      "dev.zio" %% "zio-schema-json"     % "1.0.1"
     )
   )
   .dependsOn(main)

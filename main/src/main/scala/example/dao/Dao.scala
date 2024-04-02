@@ -1,14 +1,12 @@
 package example.dao
 
 import example.SchemaParser.{GSI_INDEX_NAME, GSI_PK, GSI_SK, GSI_VALUES_PREFIX, PK, ProcessedSchemaTyped, SEPARATOR, SK, indexed}
-import software.amazon.awssdk.services.dynamodb.model.TransactionCanceledException
-import zio.dynamodb.DynamoDBError.AWSError
+import example.dao.Repository.Config
 import zio.dynamodb.ProjectionExpression.$
 import zio.dynamodb.SchemaUtils.{Timestamp, Version}
-import zio.dynamodb.proofs.CanWhere
-import zio.{Chunk, ULayer, ZIO, ZLayer, stream}
-import zio.dynamodb.{AttrMap, AttributeValue, DynamoDBError, DynamoDBExecutor, DynamoDBQuery, Item, KeyConditionExpr, LastEvaluatedKey, PrimaryKey, ProjectionExpression, TableName, ToAttributeValue, UpdateExpression}
+import zio.dynamodb._
 import zio.schema.Schema
+import zio.{Chunk, ZIO, ZLayer}
 
 object Dao {
   type IdMapping = ResourceType => Option[MappedEntity] => ResourceId
@@ -55,8 +53,8 @@ object Dao {
 
 }
 
-case class Repository(tableName: String)
-                     (executor: DynamoDBExecutor) {
+case class Repository(config: Config, executor: DynamoDBExecutor) {
+  val tableName: String = config.tableName
 
   def queryByParameter[T: Schema : ProcessedSchemaTyped, A](partitionField: Schema.Field[T, A], value: A)
                                                            (implicit t: ToAttributeValue[A])
@@ -138,6 +136,9 @@ case class Repository(tableName: String)
     items.map(_.map { item => proc.fromAttrMap(item) })
   }
 
+  //todo: add list by parent version with pagination
+
+
   // uses GSI
   def listAll[T: ProcessedSchemaTyped]: ZIO[Any, Throwable, Chunk[T]] = {
     val proc = implicitly[ProcessedSchemaTyped[T]]
@@ -194,7 +195,8 @@ case class Repository(tableName: String)
     val query = DynamoDBQuery.querySomeItem(tableName, ChunkSize)
       .whereKey($(PK).partitionKey === parent && $(SK).sortKey.beginsWith(prefix + "#" + id))
 
-    val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute.provideLayer(ZLayer.succeed(executor))
+    val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute
+      .provideLayer(ZLayer.succeed(executor))
 
     val result: ZIO[Any, Throwable, Option[T]] = x.map(_._1.headOption.map { item =>
       implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
@@ -202,4 +204,9 @@ case class Repository(tableName: String)
 
     result
   }
+}
+
+object Repository {
+  case class Config(tableName: String)
+  val live: ZLayer[Config with DynamoDBExecutor, Nothing, Repository] = ZLayer.fromFunction(Repository.apply _)
 }

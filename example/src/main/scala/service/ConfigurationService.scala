@@ -1,10 +1,12 @@
+package service
+
 import example.SchemaParser.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2, id_field, indexed, parent_field, resource_prefix}
 import example.dao.Repository
 import zio.schema.Schema.Field
 import zio.schema.Schema.Field.WithFieldName
 import zio.schema.codec.JsonCodec
 import zio.schema.{DeriveSchema, Schema}
-import zio.{Chunk, ZIO, ZLayer}
+import zio.{ZIO, ZLayer}
 
 case class ConfigurationService(repo: Repository) {
 

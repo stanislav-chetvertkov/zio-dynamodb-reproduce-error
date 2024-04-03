@@ -1,12 +1,19 @@
-import ConfigurationService.User
-import Protocol.CreateSmsEndpoint
+package api
+
+import api.Protocol.CreateUser
+import service.ConfigurationService.User
 import zio._
-import zio.http.Status._
 import zio.http._
+import zio.json.{DecoderOps, DeriveJsonDecoder, JsonDecoder}
 
 
 object Protocol {
-  case class CreateSmsEndpoint(name: String)
+  case class CreateUser(name: String, region: String, code: String, parent: String)
+
+  object CreateUser {
+    implicit val decoder: JsonDecoder[CreateUser] = DeriveJsonDecoder.gen[CreateUser]
+  }
+  //  case class GetUserResponse(id: String, region: String, code: String, parent: String)
 }
 
 trait StoreHandler {
@@ -14,7 +21,7 @@ trait StoreHandler {
                   (id: Long): Task[StoreResource.GetUserByIdResponse]
 
   def postById(respond: StoreResource.PostUserByIdResponse.type)
-              (id: Long): Task[StoreResource.PostUserByIdResponse]
+              (id: Long, user: CreateUser): Task[StoreResource.PostUserByIdResponse]
 }
 
 object StoreResource {
@@ -27,59 +34,35 @@ object StoreResource {
 
   case class ServiceError(message: String) extends Error
 
-  def routes(impl: StoreHandler): Routes[Any, Throwable] = Routes(
+  def routes(impl: StoreHandler): Routes[Any, Response] = Routes(
     Method.GET / "users" / int("id") -> {
       val x: Handler[Any, Throwable, (RuntimeFlags, Request), Response] =
         Handler.fromFunctionZIO { in: (Int, Request) =>
           impl.getOrderById(GetUserByIdResponse)(in._1).map(GetUserByIdResponse.getOrderByIdResponseTR)
         }
-      x
+      x.mapError(e => Response.text("Error: " + e.getMessage).status(Status.InternalServerError))
     },
-    Method.POST / "users" / int("id") -> {
-      val x = for {
-        req <- Handler.fromFunctionZIO { in: (Int, Request) =>
-          //decode to CreateUser
-
-          ZIO.succeed(in._1).zip(
-            in._2.body.asString.flatMap(jsonString =>
-              ZIO.fromEither(User.jsonEncoder.decoder.decodeJson(jsonString))
-                .mapError(e => DecodingError(s"Failed to decode $jsonString:" + e))
-            )
-          )
-        }
+    Method.POST / "users" -> {
+      val r = for {
+        userCreated <- Handler.fromFunction[CreateUser] { c: CreateUser => c }
+          .contramapZIO[Any, DecodingError, Request](req => {
+            req.body.asString
+              .mapError(e => DecodingError(e.getMessage))
+              .flatMap(jsonString =>
+                ZIO.fromEither(jsonString.fromJson[CreateUser])
+                  .mapError(e => DecodingError(s"Failed to decode $jsonString:" + e))
+              )
+          })
         response <- Handler.fromZIO(
           for {
-            r <- ZIO.succeed(req._2)
-            userCreated <- impl.postById(PostUserByIdResponse)(req._1).map(PostUserByIdResponse.postOrderByIdResponseTR)
+            userCreated <- impl.postById(PostUserByIdResponse)(42, userCreated).map(PostUserByIdResponse.postOrderByIdResponseTR)
           } yield {
             userCreated
           }
         )
-      } yield {
-        response
-      }
-      x
-    },
-    Method.POST / "users2" / int("id") / "page" / int("count") -> {
-      val x = for {
-        req <- Handler.fromFunctionZIO { in: (Int, Int, Request) => ZIO.succeed(in) }
-
-        //        userCreated <- Handler.fromFunction[CreateUser] { case CreateUser(_) => User(2)}
-        //          .contramapZIO[Any, DecodingError, Request](req => {
-        //            ZIO.succeed(CreateUser(req.path.encode))
-        //          })
-        response <- Handler.fromZIO(
-          for {
-            r <- ZIO.succeed(CreateSmsEndpoint("1"))
-            userCreated <- impl.postById(PostUserByIdResponse)(1l).map(PostUserByIdResponse.postOrderByIdResponseTR)
-          } yield {
-            userCreated
-          }
-        )
-      } yield {
-        response
-      }
-      x
+      } yield response
+      val q = r.mapError(e => Response.text("Error: " + e.getMessage).status(Status.InternalServerError))
+      q
     }
   )
 

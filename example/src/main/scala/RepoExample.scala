@@ -1,4 +1,6 @@
+import api.{StoreHandler, StoreHandlerImpl, StoreResource}
 import example.CreateTable
+import example.dao.Repository
 import software.amazon.awssdk.auth.credentials.{AwsBasicCredentials, StaticCredentialsProvider}
 import software.amazon.awssdk.regions.Region
 import zio._
@@ -30,31 +32,18 @@ object RepoExample extends ZIOAppDefault {
     executorLayer.orDie
   }
 
-  val getUser =
-    Endpoint(Method.GET / "users" / int("userId")).out[Int]
+  override val run = {
+    val program: ZIO[StoreHandler, Throwable, Unit] = for {
+      apiHandler <- ZIO.service[StoreHandler]
+      httpApp = StoreResource.routes(apiHandler).toHttpApp
+      _ <- Server.serve(httpApp).provide(Server.default)
+    } yield ()
 
-  val getUserRoute =
-    getUser.implement {
-      Handler.fromFunction[Int] { id =>
-        id
-      }
-    }
-
-  val getUserPosts =
-    Endpoint(Method.GET / "users" / int("userId") / "posts" / int("postId"))
-      .query(query("name"))
-      .out[List[String]]
-
-  val r = Method.GET / "text" -> handler(Response.text("Hello World!"))
-
-  val routes = Routes(getUserRoute, r)
-
-  val app = routes.toHttpApp
-
-  override val run =
-    Server.serve(app).provide(Server.default)
-}
-
-trait ApiHandler {
-  def getEndpoint(parent: Int): Response
+    program.provide(
+      StoreHandlerImpl.live,
+      createExecutorForDockerCompose,
+      Repository.live,
+      ZLayer.succeed(Repository.Config(CreateTable.TableName))
+    )
+  }
 }

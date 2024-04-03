@@ -4,11 +4,11 @@ import api.Protocol.CreateUser
 import service.ConfigurationService.User
 import zio._
 import zio.http._
-import zio.json.{DecoderOps, DeriveJsonDecoder, JsonDecoder}
+import zio.json.{DecoderOps, DeriveJsonDecoder, EncoderOps, JsonDecoder}
 
 
 object Protocol {
-  case class CreateUser(name: String, region: String, code: String, parent: String)
+  case class CreateUser(region: String, code: String, parent: String)
 
   object CreateUser {
     implicit val decoder: JsonDecoder[CreateUser] = DeriveJsonDecoder.gen[CreateUser]
@@ -38,7 +38,8 @@ object StoreResource {
     Method.GET / "users" / int("id") -> {
       val x: Handler[Any, Throwable, (RuntimeFlags, Request), Response] =
         Handler.fromFunctionZIO { in: (Int, Request) =>
-          impl.getOrderById(GetUserByIdResponse)(in._1).map(GetUserByIdResponse.getOrderByIdResponseTR)
+          impl.getOrderById(GetUserByIdResponse)(in._1)
+            .map(r => r.toResponse)
         }
       x.mapError(e => Response.text("Error: " + e.getMessage).status(Status.InternalServerError))
     },
@@ -67,40 +68,45 @@ object StoreResource {
   )
 
 
-  sealed abstract class GetUserByIdResponse(val statusCode: Status)
+  sealed abstract class GetUserByIdResponse(val statusCode: Status) {
+    def toResponse: Response
+  }
 
-  case class GetUserByIdResponseOK(value: User) extends GetUserByIdResponse(Status.Ok)
+  case class GetUserByIdResponseOK(value: User) extends GetUserByIdResponse(Status.Ok) {
 
-  case object GetUserByIdResponseBadRequest extends GetUserByIdResponse(Status.BadRequest)
+    override def toResponse: Response = {
+      Response(
+        this.statusCode,
+        Headers(Header.ContentType(MediaType.application.json).untyped),
+        Body.fromCharSequence(value.toJsonPretty)
+      )
+    }
+  }
 
-  case object GetUserByIdResponseNotFound extends GetUserByIdResponse(Status.NotFound)
+  case object GetUserByIdResponseBadRequest extends GetUserByIdResponse(Status.BadRequest) {
+
+    override def toResponse: Response = {
+      Response(
+        this.statusCode,
+        Headers(Header.ContentType(MediaType.application.json).untyped),
+        Body.fromCharSequence("""{"error": "Bad Request"}""")
+      )
+    }
+  }
+
+  case object GetUserByIdResponseNotFound extends GetUserByIdResponse(Status.NotFound) {
+    override def toResponse: Response = Response(
+      this.statusCode,
+      Headers(Header.ContentType(MediaType.application.json).untyped),
+      Body.fromCharSequence("""{"error": "Not Found"}""")
+    )
+  }
 
   object GetUserByIdResponse {
 
-    implicit def getOrderByIdResponseTR(value: GetUserByIdResponse): Response = value match {
-      case r: GetUserByIdResponseOK =>
-        Response(
-          r.statusCode,
-          Headers(Header.ContentType(MediaType.application.json).untyped),
-          Body.fromCharSequence("""{"error": "Not Found"}""") //fixme
-        )
-      case r: GetUserByIdResponseBadRequest.type =>
-        Response(
-          r.statusCode,
-          Headers(Header.ContentType(MediaType.application.json).untyped),
-          Body.fromCharSequence("""{"error": "Bad Request"}""")
-        )
-      case r: GetUserByIdResponseNotFound.type =>
-        Response(
-          r.statusCode,
-          Headers(Header.ContentType(MediaType.application.json).untyped),
-          Body.fromCharSequence("""{"error": "Not Found"}""")
-        )
-    }
+//    def apply[T](value: T)(implicit ev: T => GetUserByIdResponse): GetUserByIdResponse = ev(value)
 
-    def apply[T](value: T)(implicit ev: T => GetUserByIdResponse): GetUserByIdResponse = ev(value)
-
-    implicit def OKEv(value: User): GetUserByIdResponse = OK(value)
+//    implicit def OKEv(value: User): GetUserByIdResponse = OK(value)
 
     def OK(value: User): GetUserByIdResponse = GetUserByIdResponseOK(value)
 
@@ -125,9 +131,7 @@ object StoreResource {
         Response(
           r.statusCode,
           Headers(Header.ContentType(MediaType.application.json).untyped),
-
-          //
-          Body.fromCharSequence("""{"error": "Not Found"}""") //fixme
+          Body.fromCharSequence(r.value.toJsonPretty)
         )
       case r: PostUserByIdResponseNotFound.type =>
         Response(
@@ -137,15 +141,9 @@ object StoreResource {
         )
     }
 
-    def apply[T](value: T)(implicit ev: T => PostUserByIdResponse): PostUserByIdResponse = ev(value)
-
-    implicit def OKEv(value: User): PostUserByIdResponse = OK(value)
-
     def OK(value: User): PostUserByIdResponse = PostUserByIdResponseOK(value)
-
 
     def NotFound: PostUserByIdResponse = PostUserByIdResponseNotFound
   }
-
 
 }

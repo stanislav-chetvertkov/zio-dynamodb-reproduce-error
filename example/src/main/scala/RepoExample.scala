@@ -9,8 +9,6 @@ import zio.aws.dynamodb.DynamoDb
 import zio.aws.netty.NettyHttpClient
 import zio.dynamodb.DynamoDBExecutor
 import zio.http._
-import zio.http.codec.HttpCodec.query
-import zio.http.endpoint.Endpoint
 
 import java.net.URI
 
@@ -26,17 +24,15 @@ object RepoExample extends ZIOAppDefault {
     val dynamoClientLayer = NettyHttpClient.default >>> AwsConfig.default >>> dynLayer
     val executorLayer = dynamoClientLayer >>> DynamoDBExecutor.live
 
-    //disable if the table is already created
-    CreateTable.createTableExample.execute.provide(executorLayer)
-
     executorLayer.orDie
   }
 
   override val run = {
-    val program: ZIO[StoreHandler, Throwable, Unit] = for {
+    val program: ZIO[StoreHandler with DynamoDBExecutor, Throwable, Unit] = for {
+//      _ <- CreateTable.createTableExample.execute
       apiHandler <- ZIO.service[StoreHandler]
       httpApp = StoreResource.routes(apiHandler).toHttpApp
-      _ <- Server.serve(httpApp).provide(Server.default)
+      _ <- Server.serve(httpApp).provide(Server.defaultWithPort(8081))
     } yield ()
 
     program.provide(

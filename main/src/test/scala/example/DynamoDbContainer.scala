@@ -4,6 +4,7 @@ import com.dimafeng.testcontainers.scalatest.{IllegalWithContainersCall, TestCon
 import com.dimafeng.testcontainers.{ContainerDef, SingleContainer}
 import example.DynamoContainer.defaultDockerImageName
 import example.dao.Repository
+import example.dao.Repository.Config
 import org.testcontainers.utility.DockerImageName
 import software.amazon.awssdk.auth.credentials.{AwsBasicCredentials, StaticCredentialsProvider}
 import software.amazon.awssdk.endpoints.Endpoint
@@ -88,7 +89,10 @@ trait WithDynamoDB {
     withContainers { dyna =>
       val executorLayer = createLayer2(dyna.urlValue.url())
       CreateTable.createTableExample.execute.provide(ZLayer.succeed(executorLayer)).runUnsafe
-      val dao: Repository = Repository(CreateTable.TableName)(executorLayer)
+      val dao: Repository = Repository(
+        Config(CreateTable.TableName),
+        executorLayer
+      )
 
       runTest(dao)
     }

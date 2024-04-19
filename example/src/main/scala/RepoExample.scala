@@ -29,7 +29,8 @@ object RepoExample extends ZIOAppDefault {
 
   override val run = {
     val program: ZIO[StoreHandler with DynamoDBExecutor, Throwable, Unit] = for {
-//      _ <- CreateTable.createTableExample.execute
+      _ <- CreateTable.deleteTableQuery.execute.ignore
+      _ <- CreateTable.createTableExample.execute
       apiHandler <- ZIO.service[StoreHandler]
       httpApp = StoreResource.routes(apiHandler).toHttpApp
       _ <- Server.serve(httpApp).provide(Server.defaultWithPort(8081))

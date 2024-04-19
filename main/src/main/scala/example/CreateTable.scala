@@ -2,12 +2,15 @@ package example
 
 import example.SchemaParser.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2, PK, SK}
 import zio.dynamodb.AttributeDefinition.{attrDefnString, _}
-import zio.dynamodb.DynamoDBQuery.createTable
+import zio.dynamodb.DynamoDBQuery.{createTable, deleteTable}
 import zio.dynamodb._
 
 object CreateTable {
   val TableName = "mappings"
-  val createTableExample =
+
+  val deleteTableQuery = deleteTable(TableName)
+
+  val createTableExample: DynamoDBQuery[Any, Unit] =
     createTable(
       tableName = TableName,
       keySchema = KeySchema(hashKey = "pk", sortKey = "sk"),

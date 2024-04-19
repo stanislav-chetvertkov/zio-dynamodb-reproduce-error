@@ -10,6 +10,8 @@ import org.scalatest.matchers.must.Matchers
 import zio.dynamodb.ProjectionExpression
 import zio.schema.Schema.Field
 import zio.schema.Schema.Field.WithFieldName
+import zio.schema.annotation.validate
+import zio.schema.validation.Validation
 import zio.schema.{DeriveSchema, Schema}
 
 import scala.concurrent.duration.DurationInt
@@ -26,6 +28,7 @@ class ValidationSpec extends AnyFreeSpecLike with ScalaFutures with Matchers wit
   case class SmsEndpoint(@id_field id: String,
                          @indexed(indexName = GSI_INDEX_NAME2, pkName = GSI_PK2, skName = GSI_SK2)
                          mcc: String,
+                         @validate(Validation.maxLength(3))
                          mnc: String,
                          @parent_field parent: String) // will keep it as a string for now
 

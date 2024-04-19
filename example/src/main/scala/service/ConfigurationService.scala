@@ -4,7 +4,9 @@ import example.SchemaParser.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2, id_field, indexe
 import example.dao.Repository
 import zio.schema.Schema.Field
 import zio.schema.Schema.Field.WithFieldName
+import zio.schema.annotation.validate
 import zio.schema.codec.JsonCodec
+import zio.schema.validation.{Predicate, Validation}
 import zio.schema.{DeriveSchema, Schema}
 import zio.{ZIO, ZLayer}
 
@@ -34,6 +36,7 @@ object ConfigurationService {
   case class User(@id_field id: String,
                   @indexed(indexName = GSI_INDEX_NAME2, pkName = GSI_PK2, skName = GSI_SK2)
                   region: String,
+                  @validate(Validation.minLength(3))
                   code: String,
                   @parent_field parent: String) // will keep it as a string for now
 

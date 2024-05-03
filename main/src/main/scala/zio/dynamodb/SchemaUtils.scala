@@ -32,7 +32,7 @@ object SchemaUtils {
     k.map((_, dec.map(_._2).getOrElse(-1), dec.map(_._3).getOrElse("")))
   }
 
-  private def decodeInnerFields(av: AttributeValue, fields: Schema.Field[_, _]*): Either[DynamoDBError, (List[Any], Version, Timestamp)] =
+  private def decodeInnerFields(av: AttributeValue, fields: Schema.Field[?, ?]*): Either[DynamoDBError, (List[Any], Version, Timestamp)] =
     av match {
       case AttributeValue.Map(map) =>
         val versionOpt = map.get(AttributeValue.String("version")).map(_.asInstanceOf[AttributeValue.Number].value.toInt)

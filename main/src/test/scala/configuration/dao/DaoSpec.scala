@@ -105,7 +105,7 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
   }
 
   "write typed schema" in withDynamoDao { repo =>
-    implicit val schemaProcessor: ProcessedSchemaTyped[SmsEndpoint] = SchemaParser.validateTyped(smsSchema)
+    implicit val schemaProcessor: ProcessedSchemaTyped[SmsEndpoint] = SchemaParser.validate(smsSchema)
     val saveResult = repo.save(SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")).runUnsafe
 
     val readResult = repo.readTypedByParent[SmsEndpoint]("SMS1", "provider#3").runUnsafe
@@ -124,7 +124,7 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
   "typed schema" in {
 
     implicit val schema: Schema[SmsEndpoint] = DeriveSchema.gen
-    implicit val writer: ProcessedSchemaTyped[SmsEndpoint] = SchemaParser.validateTyped(schema)
+    implicit val writer: ProcessedSchemaTyped[SmsEndpoint] = SchemaParser.validate(schema)
 
     val instance = SmsEndpoint(id = "1", value = "2", parent = "3")
     val r = implicitly[SchemaParser.ProcessedSchemaTyped[SmsEndpoint]].toAttrMap(instance)

@@ -2,7 +2,7 @@ package configuration.dao
 
 import com.dimafeng.testcontainers.scalatest.TestContainerForEach
 import configuration.SchemaParser.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2, IndexName, id_field, indexed, parent_field, resource_prefix}
-import configuration.{DynamoContainer, WithDynamoDB}
+import configuration.{DynamoContainer, SchemaParser, WithDynamoDB}
 import org.scalatest.EitherValues
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.freespec.AnyFreeSpecLike
@@ -32,10 +32,11 @@ class ValidationSpec extends AnyFreeSpecLike with ScalaFutures with Matchers wit
 
   implicit val smsSchema: Schema[SmsEndpoint] = DeriveSchema.gen
 
-  val mccField: WithFieldName[SmsEndpoint, _, String] = smsSchema match {
+  val mccField: WithFieldName[SmsEndpoint, ?, String] = smsSchema match {
     case Schema.CaseClass4(_, id, mcc, mnc, parent, _, _) =>
       mcc match {
         case f: Field[SmsEndpoint, String] => f
+        case _ => throw new RuntimeException("mcc field not found")
       }
   }
 
@@ -43,6 +44,11 @@ class ValidationSpec extends AnyFreeSpecLike with ScalaFutures with Matchers wit
     implicit val smsSchema: Schema.CaseClass4[String, String, String, String, SmsEndpoint] = DeriveSchema.gen[SmsEndpoint]
     val (id, mcc, mnc, parent) = ProjectionExpression.accessors[SmsEndpoint]
     mnc.partitionKey
+  }
+  
+  "test" in {
+    val x = SchemaParser.validate(smsSchema)
+    print(x)
   }
 
   "query by field" in withDynamoDao { repo =>

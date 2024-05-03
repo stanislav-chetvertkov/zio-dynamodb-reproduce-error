@@ -206,7 +206,7 @@ case class Repository(config: Config, executor: DynamoDBExecutor, chunkSize: Int
 
 object Repository {
   case class Config(tableName: String)
-  val live: ZLayer[Config with DynamoDBExecutor, Nothing, Repository] = ZLayer.fromZIO(
+  val live: ZLayer[Config & DynamoDBExecutor, Nothing, Repository] = ZLayer.fromZIO(
     for {
       config <- ZIO.service[Config]
       executor <- ZIO.service[DynamoDBExecutor]

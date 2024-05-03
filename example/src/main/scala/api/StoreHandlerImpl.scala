@@ -1,7 +1,7 @@
 package api
 
 import service.ConfigurationService.User
-import example.dao.Repository
+import configuration.dao.Repository
 import zio.{Task, ZLayer}
 
 case class StoreHandlerImpl(repo: Repository) extends StoreHandler {

@@ -1,7 +1,7 @@
-package example
+package configuration
 
-import example.SchemaParser.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2, PK, SK}
-import zio.dynamodb.AttributeDefinition.{attrDefnString, _}
+import configuration.SchemaParser.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2, PK, SK}
+import zio.dynamodb.AttributeDefinition._
 import zio.dynamodb.DynamoDBQuery.{createTable, deleteTable}
 import zio.dynamodb._
 

@@ -1,9 +1,9 @@
-package example.dao
+package configuration.dao
 
 import com.dimafeng.testcontainers.scalatest.TestContainerForEach
-import example.dao.Dao._
-import example.dao.untyped.UntypedRepository
-import example.{CreateTable, DynamoContainer, WithDynamoDB}
+import configuration.dao.Dao._
+import configuration.dao.untyped.UntypedRepository
+import configuration.{CreateTable, DynamoContainer, WithDynamoDB}
 import org.scalatest.EitherValues
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.freespec.AnyFreeSpecLike

@@ -1,7 +1,7 @@
 package service
 
-import example.SchemaParser.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2, id_field, indexed, parent_field, resource_prefix}
-import example.dao.Repository
+import configuration.SchemaParser.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2, id_field, indexed, parent_field, resource_prefix}
+import configuration.dao.Repository
 import zio.schema.Schema.Field
 import zio.schema.Schema.Field.WithFieldName
 import zio.schema.annotation.validate

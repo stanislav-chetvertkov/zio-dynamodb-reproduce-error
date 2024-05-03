@@ -1,7 +1,7 @@
-package example.dao
+package configuration.dao
 
-import example.SchemaParser.{GSI_INDEX_NAME, GSI_PK, GSI_SK, GSI_VALUES_PREFIX, PK, ProcessedSchemaTyped, SEPARATOR, SK, indexed}
-import example.dao.Repository.Config
+import configuration.SchemaParser.{GSI_INDEX_NAME, GSI_PK, GSI_SK, GSI_VALUES_PREFIX, PK, ProcessedSchemaTyped, SEPARATOR, SK, indexed}
+import configuration.dao.Repository.Config
 import zio.dynamodb.ProjectionExpression.$
 import zio.dynamodb.SchemaUtils.{Timestamp, Version}
 import zio.dynamodb._
@@ -53,20 +53,20 @@ object Dao {
 
 }
 
-case class Repository(config: Config, executor: DynamoDBExecutor) {
+case class Repository(config: Config, executor: DynamoDBExecutor, chunkSize: Int){
   val tableName: String = config.tableName
 
   def queryByParameter[T: Schema : ProcessedSchemaTyped, A](partitionField: Schema.Field[T, A], value: A)
                                                            (implicit t: ToAttributeValue[A])
   : ZIO[Any, Throwable, List[T]] = {
     val indexNameOpt = partitionField.annotations.collectFirst {
-      case i:indexed => i
+      case i:indexed[_] => i
     }
 
     val index = indexNameOpt.getOrElse(throw new RuntimeException(s"Column name not found for $partitionField"))
 
     val query = DynamoDBQuery.queryAllItem(tableName) //todo:has to accomodate for history
-      .indexName(index.indexName)
+      .indexName(index.indexName.name)
       .whereKey($(index.pkName).partitionKey === value && $(index.skName).sortKey === value)
 
     val items: ZIO[Any, Throwable, Chunk[Item]] = query.execute.flatMap(_.runCollect)
@@ -120,8 +120,6 @@ case class Repository(config: Config, executor: DynamoDBExecutor) {
   // resource_type#id with 'version' column
   // resource_type#history#id#timestamp
 
-  private val ChunkSize = 10
-
   // list resource items by parent
   def list[T: ProcessedSchemaTyped](parent: String): ZIO[Any, Throwable, Chunk[T]] = {
     val proc = implicitly[ProcessedSchemaTyped[T]]
@@ -160,7 +158,7 @@ case class Repository(config: Config, executor: DynamoDBExecutor) {
     val proc = implicitly[ProcessedSchemaTyped[T]]
     val prefix = proc.resourcePrefix
 
-    val query = DynamoDBQuery.querySomeItem(tableName, ChunkSize)
+    val query = DynamoDBQuery.querySomeItem(tableName, chunkSize)
       .indexName(GSI_INDEX_NAME)
       .whereKey($("gsi_pk1").partitionKey === prefix && $("gsi_sk1").sortKey.beginsWith("values#" + id))
 
@@ -192,7 +190,7 @@ case class Repository(config: Config, executor: DynamoDBExecutor) {
     val proc = implicitly[ProcessedSchemaTyped[T]]
     val prefix = proc.resourcePrefix
 
-    val query = DynamoDBQuery.querySomeItem(tableName, ChunkSize)
+    val query = DynamoDBQuery.querySomeItem(tableName, chunkSize)
       .whereKey($(PK).partitionKey === parent && $(SK).sortKey.beginsWith(prefix + "#" + id))
 
     val x: ZIO[Any, Throwable, (Chunk[Item], LastEvaluatedKey)] = query.execute
@@ -208,5 +206,10 @@ case class Repository(config: Config, executor: DynamoDBExecutor) {
 
 object Repository {
   case class Config(tableName: String)
-  val live: ZLayer[Config with DynamoDBExecutor, Nothing, Repository] = ZLayer.fromFunction(Repository.apply _)
+  val live: ZLayer[Config with DynamoDBExecutor, Nothing, Repository] = ZLayer.fromZIO(
+    for {
+      config <- ZIO.service[Config]
+      executor <- ZIO.service[DynamoDBExecutor]
+    } yield Repository(config, executor, chunkSize = 10)
+  )
 }

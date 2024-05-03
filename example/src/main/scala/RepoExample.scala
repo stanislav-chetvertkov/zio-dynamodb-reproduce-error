@@ -1,6 +1,6 @@
 import api.{StoreHandler, StoreHandlerImpl, StoreResource}
-import example.CreateTable
-import example.dao.Repository
+import configuration.CreateTable
+import configuration.dao.Repository
 import software.amazon.awssdk.auth.credentials.{AwsBasicCredentials, StaticCredentialsProvider}
 import software.amazon.awssdk.regions.Region
 import zio._
@@ -33,7 +33,7 @@ object RepoExample extends ZIOAppDefault {
       _ <- CreateTable.createTableExample.execute
       apiHandler <- ZIO.service[StoreHandler]
       httpApp = StoreResource.routes(apiHandler).toHttpApp
-      _ <- Server.serve(httpApp).provide(Server.defaultWithPort(8081))
+      _ <- Server.serve(httpApp).provide(Server.defaultWithPort(8082))
     } yield ()
 
     program.provide(

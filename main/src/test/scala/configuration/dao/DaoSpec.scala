@@ -1,8 +1,8 @@
-package example.dao
+package configuration.dao
 
 import com.dimafeng.testcontainers.scalatest.TestContainerForEach
-import example.SchemaParser.{ProcessedSchemaTyped, id_field, indexed, parent_field, resource_prefix}
-import example.{CreateTable, DynamoContainer, SchemaParser, WithDynamoDB}
+import configuration.SchemaParser.{ProcessedSchemaTyped, id_field, indexed, parent_field, resource_prefix}
+import configuration.{CreateTable, DynamoContainer, SchemaParser, WithDynamoDB}
 import org.scalatest.EitherValues
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.freespec.AnyFreeSpecLike

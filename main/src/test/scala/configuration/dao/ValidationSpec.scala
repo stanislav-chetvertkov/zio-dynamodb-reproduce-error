@@ -1,8 +1,8 @@
-package example.dao
+package configuration.dao
 
 import com.dimafeng.testcontainers.scalatest.TestContainerForEach
-import example.SchemaParser.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2, id_field, indexed, parent_field, resource_prefix}
-import example.{DynamoContainer, WithDynamoDB}
+import configuration.SchemaParser.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2, IndexName, id_field, indexed, parent_field, resource_prefix}
+import configuration.{DynamoContainer, WithDynamoDB}
 import org.scalatest.EitherValues
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.freespec.AnyFreeSpecLike
@@ -22,11 +22,9 @@ class ValidationSpec extends AnyFreeSpecLike with ScalaFutures with Matchers wit
 
   override implicit val patienceConfig: PatienceConfig = PatienceConfig(1.seconds, 50.millis)
 
-
-
   @resource_prefix("sms_endpoint")
   case class SmsEndpoint(@id_field id: String,
-                         @indexed(indexName = GSI_INDEX_NAME2, pkName = GSI_PK2, skName = GSI_SK2)
+                         @indexed(indexName = IndexName[String](GSI_INDEX_NAME2), pkName = GSI_PK2, skName = GSI_SK2) //todo: needs to fail compilation if the macro type does not align
                          mcc: String,
                          @validate(Validation.maxLength(3))
                          mnc: String,

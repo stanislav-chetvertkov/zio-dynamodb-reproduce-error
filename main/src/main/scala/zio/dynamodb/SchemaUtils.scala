@@ -1,6 +1,6 @@
 package zio.dynamodb
 
-import example.SchemaParser.{SEPARATOR, SK, id_field}
+import configuration.SchemaParser.{SEPARATOR, SK, id_field}
 import zio.dynamodb.Codec.Decoder.{ContainerField, decoder}
 import zio.dynamodb.DynamoDBError.ItemError.DecodingError
 import zio.prelude.ForEachOps

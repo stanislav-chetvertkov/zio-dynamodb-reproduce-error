@@ -1,4 +1,4 @@
-package example
+package configuration
 
 import zio.Chunk
 import zio.dynamodb.SchemaUtils.{Timestamp, Version}
@@ -32,13 +32,15 @@ object SchemaParser {
   final case class parent_field() extends StaticAnnotation
 
 
+  case class IndexName[T](name: String)
+
   // means the field could be used in dynamo queries as a parameter
   // the value should correspond to the GSI name
   //todo: needs to have the resource prefix and the field prefix
   // actually the resource prefix is already available on the case class
   // field prefix should be helpful, maybe it's worth spliting between pk and sk
   // where pk is the resource prefix + field prefix and sk is the value
-  final case class indexed(indexName: String, pkName: String, skName: String) extends StaticAnnotation
+  final case class indexed[A](indexName: IndexName[A], pkName: String, skName: String) extends StaticAnnotation
 
   private def findIdField(fields: Chunk[Schema.Field[_, _]]): Option[Schema.Field[Any, String]] = {
     fields.find(_.annotations.exists(_.isInstanceOf[id_field]))
@@ -51,11 +53,11 @@ object SchemaParser {
 
   // collect fields that have indexed annotation
   // return list of tuples (field, indexed)
-  private def findIndexedFields[T](fields: Chunk[Schema.Field[T, _]]): Chunk[(Schema.Field[T, _], indexed)] = {
-    val fieldsWithIndexed = fields.filter(_.annotations.exists(_.isInstanceOf[indexed]))
+  private def findIndexedFields[T](fields: Chunk[Schema.Field[T, _]]): Chunk[(Schema.Field[T, _], indexed[_])] = {
+    val fieldsWithIndexed = fields.filter(_.annotations.exists(_.isInstanceOf[indexed[_]]))
       .map(field =>
         (field, field.annotations.collectFirst {
-          case i:indexed => i
+          case i:indexed[_] => i
         }.get)
       )
 

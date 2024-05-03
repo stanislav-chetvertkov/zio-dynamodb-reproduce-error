@@ -1,7 +1,7 @@
-package example.dao.untyped
+package configuration.dao.untyped
 
-import example.SchemaParser.ProcessedSchemaTyped
-import example.dao.Dao.{IdMapping, MappedEntity, Resource, ResourceId, ResourceType}
+import configuration.SchemaParser.ProcessedSchemaTyped
+import configuration.dao.Dao.{IdMapping, MappedEntity, Resource, ResourceId, ResourceType}
 import zio.dynamodb.ProjectionExpression.$
 import zio.{Chunk, ULayer, ZIO, stream}
 import zio.dynamodb.{AttrMap, AttributeValue, ConditionExpression, DynamoDBExecutor, DynamoDBQuery, Item, KeyConditionExpr, LastEvaluatedKey, ProjectionExpression}

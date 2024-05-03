@@ -1,4 +1,4 @@
-package example
+package configuration
 
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.utility.DockerImageName

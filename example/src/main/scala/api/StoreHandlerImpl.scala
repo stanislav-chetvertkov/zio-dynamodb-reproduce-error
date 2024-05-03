@@ -36,5 +36,5 @@ case class StoreHandlerImpl(repo: Repository) extends StoreHandler {
 }
 
 object StoreHandlerImpl {
-  val live: ZLayer[Repository, Nothing, StoreHandler] = ZLayer.fromFunction(StoreHandlerImpl.apply _)
+  val live: ZLayer[Repository, Nothing, StoreHandler] = ZLayer.fromFunction(StoreHandlerImpl.apply)
 }

@@ -66,6 +66,9 @@ object SchemaParser {
 
   // just a typed option to test things out
   trait ProcessedSchemaTyped[T] {
+
+    def derivedFrom: Schema[T]
+
     def resourcePrefix: String
 
     def parentId(input: T): String
@@ -100,7 +103,8 @@ object SchemaParser {
       .map(_.asInstanceOf[Schema.Field[Any, String]]).get
     val resourcePrefixValue: String = findResourcePrefix(schema).getOrElse(throw new RuntimeException("Resource prefix not found"))
 
-    val otherFields = record.fields.filterNot(_.annotations.exists(_.isInstanceOf[id_field]))
+    val otherFields: Chunk[Schema.Field[T, ?]] =
+      record.fields.filterNot(_.annotations.exists(_.isInstanceOf[id_field]))
 
     val indexedFields = findIndexedFields(record.fields)
 
@@ -129,6 +133,7 @@ object SchemaParser {
             case s: String => AttributeValue[String](s)
             case i: Int => AttributeValue[Int](i)
             case b: Boolean => AttributeValue[Boolean](b)
+            case list: List[Long] => AttributeValue[List[Long]](list)
             case other => throw new RuntimeException(s"Unsupported type: $other")
           }
           field.name -> attrValue
@@ -189,6 +194,8 @@ object SchemaParser {
       override def parentId(input: T): Timestamp = parentField.get(input)
 
       override def resourceId(input: T): String = idField.get(input)
+
+      override def derivedFrom: Schema[T] = schema
     }
   }
 

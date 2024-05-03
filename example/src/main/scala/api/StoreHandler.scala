@@ -37,7 +37,7 @@ object StoreResource {
   def routes(impl: StoreHandler): Routes[Any, Response] = Routes(
     Method.GET / "users" / int("id") -> {
       val x: Handler[Any, Throwable, (RuntimeFlags, Request), Response] =
-        Handler.fromFunctionZIO { in: (Int, Request) =>
+        Handler.fromFunctionZIO { (in: (Int, Request)) =>
           impl.getOrderById(GetUserByIdResponse)(in._1)
             .map(r => r.toResponse)
         }
@@ -45,7 +45,7 @@ object StoreResource {
     },
     Method.POST / "users" -> {
       val r = for {
-        userCreated <- Handler.fromFunction[CreateUser] { c: CreateUser => c }
+        userCreated <- Handler.fromFunction[CreateUser] { (c: CreateUser) => c }
           .contramapZIO[Any, DecodingError, Request](req => {
             req.body.asString
               .mapError(e => DecodingError(e.getMessage))

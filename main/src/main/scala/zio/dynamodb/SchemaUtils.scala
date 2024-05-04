@@ -26,7 +26,9 @@ object SchemaUtils {
   }
 
   def caseClass4Decoder[A, B, C, D, Z](schema: Schema.CaseClass4[A, B, C, D, Z]): DecoderWithTimeStamp[Z] = { (av: AttributeValue) =>
-    val dec = SchemaUtils.decodeInnerFields(av, schema.field1, schema.field2, schema.field3, schema.field4)
+    val dec: Either[DynamoDBError, (List[Any], Version, Timestamp)] =
+      SchemaUtils.decodeInnerFields(av, schema.field1, schema.field2, schema.field3, schema.field4)
+    
     val k = dec.map(_._1).map { xs =>
       schema.construct(xs(0).asInstanceOf[A], xs(1).asInstanceOf[B], xs(2).asInstanceOf[C], xs(3).asInstanceOf[D])
     }
@@ -100,4 +102,9 @@ object SchemaUtils {
     }
 
 
+  def toItem[A](a: A)(implicit schema: Schema[A]): Item =
+    FromAttributeValue.attrMapFromAttributeValue
+      .fromAttributeValue(AttributeValue.encode(a)(schema))
+      .getOrElse(throw new Exception(s"error encoding $a"))
+  
 }

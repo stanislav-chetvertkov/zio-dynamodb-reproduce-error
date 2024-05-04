@@ -2,9 +2,13 @@ package configuration
 
 import configuration.TableStructure.*
 import zio.Chunk
+import zio.dynamodb.AttributeValue.WithScalaType
 import zio.dynamodb.SchemaUtils.{Timestamp, Version}
-import zio.dynamodb.{AttrMap, AttributeValue, SchemaUtils}
-import zio.schema.{DynamicValue, Schema}
+import zio.dynamodb.{AttrMap, AttributeValue, Item, SchemaUtils}
+import zio.schema.DynamicValue.{Primitive, schema}
+import zio.schema.Schema.Field
+import zio.schema.Schema.Field.WithFieldName
+import zio.schema.{DynamicValue, Schema, StandardType}
 
 import java.time.Instant
 import scala.annotation.StaticAnnotation
@@ -76,7 +80,7 @@ object SchemaParser {
 
   // fields for accessing timestamp, sort key, and partition key
   // validates the schema to make sure if has the required annotations and returns a processor
-  def validate[T](schema: Schema[T]): ProcessedSchemaTyped[T] = {
+  def validate[T](schema: Schema[T]): ProcessedSchemaTyped[T] = { //todo: should return either
     val record: Schema.Record[T] = schema match {
       case record: Schema.Record[_] => record
       case other => throw new RuntimeException(s"Expected record, got $other")
@@ -114,17 +118,7 @@ object SchemaParser {
           Map.empty[String, AttributeValue]
         }
 
-        val otherAttributes: Map[String, AttributeValue] = otherFields.map { field =>
-          val fieldValue = field.get(input)
-          val attrValue = fieldValue match { //is it compile time safe?
-            case s: String => AttributeValue[String](s)
-            case i: Int => AttributeValue[Int](i)
-            case b: Boolean => AttributeValue[Boolean](b)
-            case list: List[Long] => AttributeValue[List[Long]](list)
-            case other => throw new RuntimeException(s"Unsupported type: $other")
-          }
-          field.name -> attrValue
-        }.toMap
+        val x: Item = SchemaUtils.toItem(input)(schema)
 
         val now = Instant.now().toString //todo: should be passed as an argument
         val id = idField.get(input)
@@ -154,7 +148,7 @@ object SchemaParser {
           },
           TIMESTAMP -> AttributeValue(now),
           "version" -> AttributeValue(version)
-        ) ++ otherAttributes ++ indexed
+        ) ++ indexed ++ x.map
 
         AttrMap(attributes)
       }

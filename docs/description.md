@@ -147,6 +147,9 @@ we get 2 records
 
 ## TODOS
 
+- [ ] case classes with complex fields 
+- [ ] validation when inserting data
+- [ ] auto migrations when changing the schema
 - [ ] bulk insert
 - [ ] bulk update per parent
 - [ ] integration test with exposed REST API

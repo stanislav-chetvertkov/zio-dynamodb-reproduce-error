@@ -43,6 +43,18 @@ class ValidationSpec extends AnyFreeSpecLike with ScalaFutures with Matchers wit
 
   implicit val userSchema: Schema[User] = DeriveSchema.gen
 
+  case class Address(zipCode: String, street: String, city: String)
+
+  @resource_prefix("nested_user")
+  case class NestedUser(@id_field id: String,
+                        @validate(Validation.minLength(3))
+                        name: String,
+                        address: Address,
+                        @parent_field parent: String) // will keep it as a string for now
+
+  implicit val nestedUserSchema: Schema[NestedUser] = DeriveSchema.gen
+
+
   val mccField: WithFieldName[SmsEndpoint, ?, String] = smsSchema match {
     case Schema.CaseClass4(_, id, mcc, mnc, parent, _, _) =>
       mcc match {
@@ -56,6 +68,16 @@ class ValidationSpec extends AnyFreeSpecLike with ScalaFutures with Matchers wit
     val (id, mcc, mnc, parent) = ProjectionExpression.accessors[SmsEndpoint]
     mnc.partitionKey
   }
+
+  "nested user test" in {
+    val processor = SchemaParser.validate(nestedUserSchema)
+    val user = NestedUser("1", "name" , Address("12345", "street", "city"), "parent#1")
+
+    val attrs = processor.toAttrMap(user)
+    println(attrs)
+    processor.fromAttrMap(attrs) mustBe user
+  }
+
 
   "test" in {
     val processor = SchemaParser.validate(userSchema)

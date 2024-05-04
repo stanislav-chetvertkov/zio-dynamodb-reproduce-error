@@ -1,9 +1,9 @@
 package configuration
 
-import configuration.SchemaParser.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2, PK, SK}
-import zio.dynamodb.AttributeDefinition._
+import configuration.TableStructure.*
+import zio.dynamodb.AttributeDefinition.*
 import zio.dynamodb.DynamoDBQuery.{createTable, deleteTable}
-import zio.dynamodb._
+import zio.dynamodb.*
 
 object CreateTable {
   val TableName = "mappings"

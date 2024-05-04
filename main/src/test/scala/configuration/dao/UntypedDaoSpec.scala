@@ -1,7 +1,6 @@
 package configuration.dao
 
 import com.dimafeng.testcontainers.scalatest.TestContainerForEach
-import configuration.dao.Dao._
 import configuration.dao.untyped.UntypedRepository
 import configuration.{CreateTable, DynamoContainer, WithDynamoDB}
 import org.scalatest.EitherValues

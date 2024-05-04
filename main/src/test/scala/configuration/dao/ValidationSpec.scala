@@ -1,7 +1,8 @@
 package configuration.dao
 
 import com.dimafeng.testcontainers.scalatest.TestContainerForEach
-import configuration.SchemaParser.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2, IndexName, id_field, indexed, parent_field, resource_prefix}
+import configuration.SchemaParser.{IndexName, id_field, indexed, parent_field, resource_prefix}
+import configuration.TableStructure.*
 import configuration.{DynamoContainer, SchemaParser, WithDynamoDB}
 import org.scalatest.EitherValues
 import org.scalatest.concurrent.ScalaFutures

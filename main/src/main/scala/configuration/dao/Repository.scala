@@ -1,57 +1,13 @@
 package configuration.dao
 
-import configuration.SchemaParser.{GSI_INDEX_NAME, GSI_PK, GSI_SK, GSI_VALUES_PREFIX, PK, ProcessedSchemaTyped, SEPARATOR, SK, indexed}
+import configuration.SchemaParser.{ProcessedSchemaTyped, indexed}
+import configuration.TableStructure.*
 import configuration.dao.Repository.Config
 import zio.dynamodb.ProjectionExpression.$
 import zio.dynamodb.SchemaUtils.{Timestamp, Version}
-import zio.dynamodb._
+import zio.dynamodb.*
 import zio.schema.Schema
 import zio.{Chunk, ZIO, ZLayer}
-
-object Dao {
-  type IdMapping = ResourceType => Option[MappedEntity] => ResourceId
-
-  sealed trait Field {
-    def toAttributeValue: AttributeValue
-  }
-
-  object Field {
-    case class StringField(value: String) extends Field {
-      override def toAttributeValue: AttributeValue = AttributeValue(value)
-    }
-
-    case class IntField(value: Int) extends Field {
-      override def toAttributeValue: AttributeValue = AttributeValue(value)
-    }
-
-    case class BooleanField(value: Boolean) extends Field {
-      override def toAttributeValue: AttributeValue = AttributeValue(value)
-    }
-  }
-
-  case class Resource(resourceType: ResourceType, id: ResourceId) {
-    def flatPrefix = s"${resourceType.value}#${id.value}"
-  }
-
-  object Resource {
-    def fromValues(prefix: String, id: String): Resource = Resource(ResourceType(prefix), ResourceId(id))
-  }
-
-  case class ResourceType(value: String) extends AnyVal
-
-  case class ResourceId(value: String) extends AnyVal
-
-  // given resource type and an object(entity) of this type we could generate a resource id (or extract it from the entity if it could be derived from the entity itself
-
-
-  case class MappedEntity(resourcePrefix: ResourceType, id: ResourceId, fields: Map[String, Field], parent: Option[MappedEntity]) {
-    def sk(time: Long) = s"${resourcePrefix.value}#${id.value}#$time"
-  }
-
-  // when a new entity is being persisted there could be no id yet, there has to be a function that gives us the id
-  // based on the resource prefix, we should be able to get this information after parsing the specs
-
-}
 
 case class Repository(config: Config, executor: DynamoDBExecutor, chunkSize: Int){
   val tableName: String = config.tableName

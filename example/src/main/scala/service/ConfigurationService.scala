@@ -1,7 +1,8 @@
 package service
 
-import configuration.SchemaParser.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2, id_field, indexed, parent_field, resource_prefix}
+import configuration.SchemaParser.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2, IndexName, id_field, indexed, parent_field, resource_prefix}
 import configuration.dao.Repository
+import zio.json.{JsonCodec, JsonDecoder, JsonEncoder}
 import zio.schema.Schema.Field
 import zio.schema.Schema.Field.WithFieldName
 import zio.schema.annotation.validate
@@ -34,7 +35,7 @@ case class ConfigurationService(repo: Repository) {
 object ConfigurationService {
   @resource_prefix("user")
   case class User(@id_field id: String,
-                  @indexed(indexName = GSI_INDEX_NAME2, pkName = GSI_PK2, skName = GSI_SK2)
+                  @indexed(indexName = IndexName(GSI_INDEX_NAME2), pkName = GSI_PK2, skName = GSI_SK2)
                   region: String,
                   @validate(Validation.minLength(3))
                   code: String,
@@ -42,16 +43,18 @@ object ConfigurationService {
 
   object User {
     implicit val schema: Schema[User] = DeriveSchema.gen
-    implicit val jsonEncoder = JsonCodec.jsonCodec[User](schema)
+    implicit val jsonEncoder: JsonEncoder[User] = zio.schema.codec.JsonCodec.jsonEncoder(schema)
+    implicit val jsonDecoder: JsonDecoder[User] = zio.schema.codec.JsonCodec.jsonDecoder(schema)
   }
 
-  val mccField: WithFieldName[User, _, String] = User.schema match {
+  val mccField: WithFieldName[User, ?, String] = User.schema match {
     case Schema.CaseClass4(_, id, mcc, mnc, parent, _, _) =>
       mcc match {
-        case f: Field[User, String] => f
+        case f => f.asInstanceOf[Field[User, String]]
       }
+    case _ => throw new RuntimeException("Invalid schema")
   }
 
-  val live: ZLayer[Repository, Nothing, ConfigurationService] = ZLayer.fromFunction(ConfigurationService.apply _)
+  val live: ZLayer[Repository, Nothing, ConfigurationService] = ZLayer.fromFunction(ConfigurationService.apply)
 
 }

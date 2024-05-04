@@ -1,5 +1,6 @@
 package configuration
 
+import configuration.TableStructure.*
 import zio.Chunk
 import zio.dynamodb.SchemaUtils.{Timestamp, Version}
 import zio.dynamodb.{AttrMap, AttributeValue, SchemaUtils}
@@ -10,20 +11,6 @@ import scala.annotation.StaticAnnotation
 import scala.language.implicitConversions
 
 object SchemaParser {
-  val GSI_SK: String = "gsi_sk1"
-  val GSI_PK: String = "gsi_pk1"
-  val GSI_PK2: String = "gsi_pk2"
-  val GSI_SK2: String = "gsi_sk2"
-  val PK: String = "pk"
-  val SK: String = "sk"
-  val TIMESTAMP = "timestamp"
-  val SEPARATOR = "#"
-  val HISTORY = "history"
-  val GSI_VALUES_PREFIX = "values"
-
-  val GSI_INDEX_NAME = "gsi1"
-  val GSI_INDEX_NAME2 = "gsi2"
-
   final case class resource_prefix(name: String) extends StaticAnnotation
 
   // uniquely identifies the record
@@ -42,22 +29,22 @@ object SchemaParser {
   // where pk is the resource prefix + field prefix and sk is the value
   final case class indexed[A](indexName: IndexName[A], pkName: String, skName: String) extends StaticAnnotation
 
-  private def findIdField(fields: Chunk[Schema.Field[_, _]]): Option[Schema.Field[Any, String]] = {
+  private def findIdField(fields: Chunk[Schema.Field[?, ?]]): Option[Schema.Field[Any, String]] = {
     fields.find(_.annotations.exists(_.isInstanceOf[id_field]))
       .map(_.asInstanceOf[Schema.Field[Any, String]]) //todo: check if there is only one id field in the schema
   }
 
-  private def findResourcePrefix(schema: Schema[_]): Option[String] = schema.annotations.collectFirst {
+  private def findResourcePrefix(schema: Schema[?]): Option[String] = schema.annotations.collectFirst {
     case resource_prefix(name) => name
   }
 
   // collect fields that have indexed annotation
   // return list of tuples (field, indexed)
-  private def findIndexedFields[T](fields: Chunk[Schema.Field[T, _]]): Chunk[(Schema.Field[T, _], indexed[_])] = {
-    val fieldsWithIndexed = fields.filter(_.annotations.exists(_.isInstanceOf[indexed[_]]))
+  private def findIndexedFields[T](fields: Chunk[Schema.Field[T, ?]]): Chunk[(Schema.Field[T, ?], indexed[?])] = {
+    val fieldsWithIndexed = fields.filter(_.annotations.exists(_.isInstanceOf[indexed[?]]))
       .map(field =>
         (field, field.annotations.collectFirst {
-          case i:indexed[_] => i
+          case i: indexed[_] => i
         }.get)
       )
 
@@ -66,6 +53,9 @@ object SchemaParser {
 
   // just a typed option to test things out
   trait ProcessedSchemaTyped[T] {
+
+    def derivedFrom: Schema[T]
+
     def resourcePrefix: String
 
     def parentId(input: T): String
@@ -81,42 +71,43 @@ object SchemaParser {
     def fromAttrMap(attrMap: AttrMap): T = fromAttrMapWithTimestamp(attrMap)._1
   }
 
-  implicit def toProcessor[T](implicit schema: Schema[T]): ProcessedSchemaTyped[T] = validateTyped(schema)
 
+  implicit def toProcessor[T](implicit schema: Schema[T]): ProcessedSchemaTyped[T] = validate(schema)
+
+  // fields for accessing timestamp, sort key, and partition key
   // validates the schema to make sure if has the required annotations and returns a processor
-  def validateTyped[T](schema: Schema[T]): ProcessedSchemaTyped[T] = {
-    val record = schema match {
+  def validate[T](schema: Schema[T]): ProcessedSchemaTyped[T] = {
+    val record: Schema.Record[T] = schema match {
       case record: Schema.Record[_] => record
       case other => throw new RuntimeException(s"Expected record, got $other")
     }
 
-    val idField: Schema.Field[Any, String] = findIdField(record.fields).getOrElse(throw new RuntimeException("Id field not found for the schema")) //todo: add schema name
+    //todo: add schema name
+    val idField: Schema.Field[Any, String] = findIdField(record.fields)
+      .getOrElse(throw new RuntimeException("Id field not found for the schema"))
+
     val parentField: Schema.Field[Any, String] = record.fields.find(_.annotations.exists(_.isInstanceOf[parent_field]))
       .map(_.asInstanceOf[Schema.Field[Any, String]]).get
     val resourcePrefixValue: String = findResourcePrefix(schema).getOrElse(throw new RuntimeException("Resource prefix not found"))
 
-    val otherFields = record.fields.filterNot(_.annotations.exists(_.isInstanceOf[id_field]))
+    val otherFields: Chunk[Schema.Field[T, ?]] =
+      record.fields.filterNot(_.annotations.exists(_.isInstanceOf[id_field]))
+
+    val indexedFields = findIndexedFields(record.fields)
 
     new ProcessedSchemaTyped[T] {
       def toAttrMap(input: T, version: Int, isHistoryRecord: Boolean = false): AttrMap = {
-
-        //todo: write indexed fields
-        val indexed = if (!isHistoryRecord){
-          findIndexedFields(record.fields).map { case (field, indexed) =>
+        val indexed = if (!isHistoryRecord) {
+          indexedFields.map { case (field, indexed) =>
             val attrValue: AttributeValue = field.get(input) match {
-              case s: String => AttributeValue(s)
-              case i: Int => AttributeValue(i)
-              case b: Boolean => AttributeValue(b)
+              case s: String => AttributeValue[String](s)
+              case i: Int => AttributeValue[Int](i)
+              case b: Boolean => AttributeValue[Boolean](b)
               case other => throw new RuntimeException(s"Unsupported type: $other")
             }
 
-            val pkColumnName = indexed.pkName
-            val pkEntry = pkColumnName -> attrValue
-
-            val skColumnName = indexed.skName
-            val skEntry = skColumnName -> attrValue
-            println(pkEntry)
-            println(skEntry)
+            val pkEntry = indexed.pkName -> attrValue
+            val skEntry = indexed.skName -> attrValue
             List(pkEntry, skEntry)
           }.flatten.toMap
         } else {
@@ -124,17 +115,18 @@ object SchemaParser {
         }
 
         val otherAttributes: Map[String, AttributeValue] = otherFields.map { field =>
-          val value = field.get(input)
-          val attrValue = value match {
-            case s: String => AttributeValue(s)
-            case i: Int => AttributeValue(i)
-            case b: Boolean => AttributeValue(b)
+          val fieldValue = field.get(input)
+          val attrValue = fieldValue match { //is it compile time safe?
+            case s: String => AttributeValue[String](s)
+            case i: Int => AttributeValue[Int](i)
+            case b: Boolean => AttributeValue[Boolean](b)
+            case list: List[Long] => AttributeValue[List[Long]](list)
             case other => throw new RuntimeException(s"Unsupported type: $other")
           }
           field.name -> attrValue
         }.toMap
 
-        val now = Instant.now().toString
+        val now = Instant.now().toString //todo: should be passed as an argument
         val id = idField.get(input)
         val attributes: Map[String, AttributeValue] = Map(
           SK -> {
@@ -145,8 +137,8 @@ object SchemaParser {
               AttributeValue(resourcePrefix + SEPARATOR + id)
             }
           },
-          "pk" -> AttributeValue(parentField.get(input)),
-          "gsi_pk1" -> AttributeValue(resourcePrefix),
+          PK -> AttributeValue(parentField.get(input)),
+          GSI_PK -> AttributeValue(resourcePrefix),
           GSI_SK -> {
             if (isHistoryRecord) {
               // I'm not sure whether it's better to have version in the sort key or the timestamp
@@ -180,6 +172,7 @@ object SchemaParser {
             SchemaUtils.caseClass4Decoder(s)
               .apply(attributeValueMap)
               .getOrElse(throw new RuntimeException(s"Failed to parse $params"))
+          case other => throw new RuntimeException(s"Unsupported schema: $other")
         }
       }
 
@@ -188,16 +181,9 @@ object SchemaParser {
       override def parentId(input: T): Timestamp = parentField.get(input)
 
       override def resourceId(input: T): String = idField.get(input)
+
+      override def derivedFrom: Schema[T] = schema
     }
-
-
-  }
-
-  //a method that accepts schema
-  // we return fields to access the fields
-  // i need fields for accessing timestamp, sort key, and partition key
-  def validate[T](schema: Schema[T]): ProcessedSchemaTyped[T] = {
-      ???
   }
 
 }

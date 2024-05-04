@@ -1,11 +1,9 @@
 package configuration.dao.untyped
 
-import configuration.SchemaParser.ProcessedSchemaTyped
-import configuration.dao.Dao.{IdMapping, MappedEntity, Resource, ResourceId, ResourceType}
+import configuration.dao.untyped.UntypedDao.{IdMapping, MappedEntity, Resource}
 import zio.dynamodb.ProjectionExpression.$
-import zio.{Chunk, ULayer, ZIO, stream}
-import zio.dynamodb.{AttrMap, AttributeValue, ConditionExpression, DynamoDBExecutor, DynamoDBQuery, Item, KeyConditionExpr, LastEvaluatedKey, ProjectionExpression}
-
+import zio.dynamodb.*
+import zio.{Chunk, ULayer, ZIO}
 
 case class UntypedRepository(tableName: String,
                       resourceMappings: Vector[IdMapping])
@@ -50,4 +48,47 @@ case class UntypedRepository(tableName: String,
     x
   }
 
+}
+
+object UntypedDao {
+  // when a new entity is being persisted there could be no id yet, there has to be a function that gives us the id
+  // based on the resource prefix, we should be able to get this information after parsing the specs
+
+  type IdMapping = ResourceType => Option[MappedEntity] => ResourceId
+
+  sealed trait Field {
+    def toAttributeValue: AttributeValue
+  }
+
+  object Field {
+    case class StringField(value: String) extends Field {
+      override def toAttributeValue: AttributeValue = AttributeValue(value)
+    }
+
+    case class IntField(value: Int) extends Field {
+      override def toAttributeValue: AttributeValue = AttributeValue(value)
+    }
+
+    case class BooleanField(value: Boolean) extends Field {
+      override def toAttributeValue: AttributeValue = AttributeValue(value)
+    }
+  }
+
+  case class ResourceType(value: String) extends AnyVal
+
+  case class ResourceId(value: String) extends AnyVal
+
+  // given resource type and an object(entity) of this type we could generate a resource id (or extract it from the entity if it could be derived from the entity itself
+
+  case class MappedEntity(resourcePrefix: ResourceType, id: ResourceId, fields: Map[String, Field], parent: Option[MappedEntity]) {
+    def sk(time: Long) = s"${resourcePrefix.value}#${id.value}#$time"
+  }
+
+  case class Resource(resourceType: ResourceType, id: ResourceId) {
+    def flatPrefix = s"${resourceType.value}#${id.value}"
+  }
+
+  object Resource {
+    def fromValues(prefix: String, id: String): Resource = Resource(ResourceType(prefix), ResourceId(id))
+  }
 }

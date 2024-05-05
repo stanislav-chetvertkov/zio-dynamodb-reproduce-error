@@ -14,7 +14,26 @@ import java.time.Instant
 import scala.annotation.StaticAnnotation
 import scala.language.implicitConversions
 
-object SchemaParser {
+trait ConfigSchemaCodec[T] {
+
+  def derivedFrom: Schema[T]
+
+  def resourcePrefix: String
+
+  def parentId(input: T): String
+
+  def resourceId(input: T): String
+
+  def toAttrMap(input: T): AttrMap = toAttrMap(input, 1)
+
+  def toAttrMap(input: T, version: Int, isHistory: Boolean = false): AttrMap
+
+  def fromAttrMapWithTimestamp(attrMap: AttrMap): (T, Version, Timestamp)
+
+  def fromAttrMap(attrMap: AttrMap): T = fromAttrMapWithTimestamp(attrMap)._1
+}
+
+object ConfigSchemaCodec {
   final case class resource_prefix(name: String) extends StaticAnnotation
 
   // uniquely identifies the record
@@ -54,33 +73,26 @@ object SchemaParser {
 
     fieldsWithIndexed
   }
-
-  // just a typed option to test things out
-  trait ProcessedSchemaTyped[T] {
-
-    def derivedFrom: Schema[T]
-
-    def resourcePrefix: String
-
-    def parentId(input: T): String
-
-    def resourceId(input: T): String
-
-    def toAttrMap(input: T): AttrMap = toAttrMap(input, 1)
-
-    def toAttrMap(input: T, version: Int, isHistory: Boolean = false): AttrMap
-
-    def fromAttrMapWithTimestamp(attrMap: AttrMap): (T, Version, Timestamp)
-
-    def fromAttrMap(attrMap: AttrMap): T = fromAttrMapWithTimestamp(attrMap)._1
+  
+  enum ValidationError {
+    case MissingIdField
+    case MissingResourcePrefix
+    case ComplexTypeIndexed(fieldName: String)
+  }
+  
+  def validateIndexedField(field: Field[?, ?]): Either[ValidationError, Unit] = {
+    // check that it has primitive type (complex types could not be indexed
+    field.schema match {
+      case _: Primitive[_] => Right(())
+      case _ => Left(ValidationError.ComplexTypeIndexed(field.name))
+    }
   }
 
-
-  implicit def toProcessor[T](implicit schema: Schema[T]): ProcessedSchemaTyped[T] = validate(schema)
+  implicit def toProcessor[T](implicit schema: Schema[T]): ConfigSchemaCodec[T] = fromSchema(schema)
 
   // fields for accessing timestamp, sort key, and partition key
   // validates the schema to make sure if has the required annotations and returns a processor
-  def validate[T](schema: Schema[T]): ProcessedSchemaTyped[T] = { //todo: should return either
+  def fromSchema[T](schema: Schema[T]): ConfigSchemaCodec[T] = { //todo: should return either
     val record: Schema.Record[T] = schema match {
       case record: Schema.Record[_] => record
       case other => throw new RuntimeException(s"Expected record, got $other")
@@ -99,7 +111,7 @@ object SchemaParser {
 
     val indexedFields = findIndexedFields(record.fields)
 
-    new ProcessedSchemaTyped[T] {
+    new ConfigSchemaCodec[T] {
       def toAttrMap(input: T, version: Int, isHistoryRecord: Boolean = false): AttrMap = {
         val indexed = if (!isHistoryRecord) {
           indexedFields.map { case (field, indexed) =>

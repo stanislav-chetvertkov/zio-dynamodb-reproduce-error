@@ -1,9 +1,9 @@
 package configuration.dao
 
 import com.dimafeng.testcontainers.scalatest.TestContainerForEach
-import configuration.SchemaParser.{IndexName, id_field, indexed, parent_field, resource_prefix}
+import configuration.ConfigSchemaCodec.{IndexName, id_field, indexed, parent_field, resource_prefix}
 import configuration.TableStructure.*
-import configuration.{DynamoContainer, SchemaParser, WithDynamoDB}
+import configuration.{ConfigSchemaCodec, DynamoContainer, WithDynamoDB}
 import org.scalatest.EitherValues
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.freespec.AnyFreeSpecLike
@@ -70,7 +70,7 @@ class ValidationSpec extends AnyFreeSpecLike with ScalaFutures with Matchers wit
   }
 
   "nested user test" in {
-    val processor = SchemaParser.validate(nestedUserSchema)
+    val processor = ConfigSchemaCodec.fromSchema(nestedUserSchema)
     val user = NestedUser("1", "name" , Address("12345", "street", "city"), "parent#1")
 
     val attrs = processor.toAttrMap(user)
@@ -80,7 +80,7 @@ class ValidationSpec extends AnyFreeSpecLike with ScalaFutures with Matchers wit
 
 
   "test" in {
-    val processor = SchemaParser.validate(userSchema)
+    val processor = ConfigSchemaCodec.fromSchema(userSchema)
     val user = User("1", "name", List(1l, 2l, 3l), "parent#1")
 
     val attrs = processor.toAttrMap(user)
@@ -102,7 +102,6 @@ class ValidationSpec extends AnyFreeSpecLike with ScalaFutures with Matchers wit
     val result: List[SmsEndpoint] = repo.queryByParameter(mccField, "001").runUnsafe
 
     result must contain theSameElementsAs List(smsEndpoint1, smsEndpoint3)
-
   }
 
 }

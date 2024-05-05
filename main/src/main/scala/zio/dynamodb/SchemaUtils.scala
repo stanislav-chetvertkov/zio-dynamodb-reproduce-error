@@ -1,6 +1,6 @@
 package zio.dynamodb
 
-import configuration.SchemaParser.id_field
+import configuration.ConfigSchemaCodec.id_field
 import configuration.TableStructure.*
 import zio.dynamodb.Codec.Decoder.{ContainerField, decoder}
 import zio.dynamodb.DynamoDBError.ItemError.DecodingError
@@ -46,7 +46,7 @@ object SchemaUtils {
           case Schema.Field(key, schema, annotations, _, _, _) =>
             if (annotations.exists(_.isInstanceOf[id_field])) {
               val maybeValue: Option[AttributeValue] = map.get(AttributeValue.String(SK))
-              val r = maybeValue.get match {
+              val r: Either[DecodingError, Timestamp] = maybeValue.get match {
                 case AttributeValue.String(value) =>
                   value.split(SEPARATOR).toList match {
                     case "history" :: prefix :: id :: tail => // history subsection

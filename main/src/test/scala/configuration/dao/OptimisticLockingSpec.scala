@@ -1,8 +1,8 @@
 package configuration.dao
 
 import com.dimafeng.testcontainers.scalatest.TestContainerForEach
-import configuration.SchemaParser.{ProcessedSchemaTyped, id_field, parent_field, resource_prefix}
-import configuration.{CreateTable, DynamoContainer, WithDynamoDB}
+import configuration.ConfigSchemaCodec.{id_field, parent_field, resource_prefix}
+import configuration.{ConfigSchemaCodec, CreateTable, DynamoContainer, WithDynamoDB}
 import org.scalatest.EitherValues
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.freespec.AnyFreeSpecLike
@@ -11,6 +11,7 @@ import zio.dynamodb.AttrMap
 import zio.dynamodb.SchemaUtils.{Timestamp, Version}
 import zio.schema.{DeriveSchema, Schema}
 import zio.{Exit, IO, Unsafe}
+
 import scala.concurrent.duration.DurationInt
 
 class OptimisticLockingSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with EitherValues with TestContainerForEach with WithDynamoDB {
@@ -30,7 +31,7 @@ class OptimisticLockingSpec extends AnyFreeSpecLike with ScalaFutures with Match
   "schema serialize with history=false" in {
     val voiceEndpoint = VoiceEndpoint(voice_id = "voice1", ip = "127.0.0.1", capacity = 10, parent = "provider#3")
 
-    val processor = implicitly[ProcessedSchemaTyped[VoiceEndpoint]]
+    val processor = implicitly[ConfigSchemaCodec[VoiceEndpoint]]
 
     val props = processor.toAttrMap(voiceEndpoint, 1, isHistory = false)
     println(props)
@@ -40,7 +41,7 @@ class OptimisticLockingSpec extends AnyFreeSpecLike with ScalaFutures with Match
 
   "schema serialize with history=true" in {
     val voiceEndpoint = VoiceEndpoint(voice_id = "voice1", ip = "127.0.0.1", capacity = 10, parent = "provider#3")
-    val processor = implicitly[ProcessedSchemaTyped[VoiceEndpoint]]
+    val processor = implicitly[ConfigSchemaCodec[VoiceEndpoint]]
 
     val props: AttrMap = processor.toAttrMap(voiceEndpoint, 1, isHistory = true)
     props.get[String]("gsi_sk1") mustBe Right("history#voice1#1")

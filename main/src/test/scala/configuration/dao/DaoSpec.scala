@@ -1,8 +1,8 @@
 package configuration.dao
 
 import com.dimafeng.testcontainers.scalatest.TestContainerForEach
-import configuration.SchemaParser.{ProcessedSchemaTyped, id_field, indexed, parent_field, resource_prefix}
-import configuration.{CreateTable, DynamoContainer, SchemaParser, WithDynamoDB}
+import configuration.ConfigSchemaCodec.{id_field, indexed, parent_field, resource_prefix}
+import configuration.{ConfigSchemaCodec, CreateTable, DynamoContainer, WithDynamoDB}
 import org.scalatest.EitherValues
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.freespec.AnyFreeSpecLike
@@ -18,6 +18,13 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
   override val containerDef: DynamoContainer.Def = DynamoContainer.Def()
 
   override implicit val patienceConfig: PatienceConfig = PatienceConfig(1.seconds, 50.millis)
+
+  case class Network(mcc: String, mnc: String)
+
+  @resource_prefix("sms_endpoint_ext")
+  case class SmsEndpointExt(@id_field id: String,
+                            network: Network,
+                            @parent_field parent: String)
 
   @resource_prefix("sms_endpoint")
   case class SmsEndpoint(@id_field id: String,
@@ -42,6 +49,7 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
     val (id, mcc, errorCode, parent) = ProjectionExpression.accessors[DlrErrorCodeMapping]
   }
 
+  implicit val smsSchemaExt: Schema[SmsEndpointExt] = DeriveSchema.gen
   implicit val smsSchema: Schema[SmsEndpoint] = DeriveSchema.gen
   implicit val voiceSchema: Schema[VoiceEndpoint] = DeriveSchema.gen
 
@@ -105,7 +113,7 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
   }
 
   "write typed schema" in withDynamoDao { repo =>
-    implicit val schemaProcessor: ProcessedSchemaTyped[SmsEndpoint] = SchemaParser.validate(smsSchema)
+    implicit val schemaProcessor: ConfigSchemaCodec[SmsEndpoint] = ConfigSchemaCodec.fromSchema(smsSchema)
     val saveResult = repo.save(SmsEndpoint(id = "SMS1", value = "payload", parent = "provider#3")).runUnsafe
 
     val readResult = repo.readTypedByParent[SmsEndpoint]("SMS1", "provider#3").runUnsafe
@@ -121,13 +129,30 @@ class DaoSpec extends AnyFreeSpecLike with ScalaFutures with Matchers with Eithe
     list2.length mustBe 1
   }
 
+  "write typed schema (sms endpoint ext)" in withDynamoDao { repo =>
+    implicit val schemaProcessor: ConfigSchemaCodec[SmsEndpointExt] = ConfigSchemaCodec.fromSchema(DeriveSchema.gen)
+    val saveResult = repo.save(SmsEndpointExt("SMS1", Network("mcc", "mnc"), "provider#3")).runUnsafe
+
+    val readResult = repo.readTypedByParent[SmsEndpointExt]("SMS1", "provider#3").runUnsafe
+    readResult.get mustBe SmsEndpointExt("SMS1", Network("mcc", "mnc"), "provider#3")
+
+    repo.save(SmsEndpointExt("SMS2", Network("mcc", "mnc"), "provider#3")).runUnsafe
+    repo.save(SmsEndpointExt("SMS3", Network("mcc", "mnc"), "provider#4")).runUnsafe
+
+    val list = repo.list[SmsEndpointExt]("provider#3").runUnsafe
+    list.length mustBe 2
+
+    val list2 = repo.list[SmsEndpointExt]("provider#4").runUnsafe
+    list2.length mustBe 1
+  }
+
   "typed schema" in {
 
     implicit val schema: Schema[SmsEndpoint] = DeriveSchema.gen
-    implicit val writer: ProcessedSchemaTyped[SmsEndpoint] = SchemaParser.validate(schema)
+    implicit val writer: ConfigSchemaCodec[SmsEndpoint] = ConfigSchemaCodec.fromSchema(schema)
 
     val instance = SmsEndpoint(id = "1", value = "2", parent = "3")
-    val r = implicitly[SchemaParser.ProcessedSchemaTyped[SmsEndpoint]].toAttrMap(instance)
+    val r = implicitly[ConfigSchemaCodec[SmsEndpoint]].toAttrMap(instance)
     r.map.get("sk").map(_.decode[String].value).get must startWith("sms_endpoint#1")
 
     print(r)

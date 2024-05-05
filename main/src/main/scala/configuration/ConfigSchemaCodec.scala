@@ -1,14 +1,12 @@
 package configuration
 
+import configuration.ConfigSchemaCodec.{Timestamp, Version}
 import configuration.TableStructure.*
 import zio.Chunk
-import zio.dynamodb.AttributeValue.WithScalaType
-import zio.dynamodb.SchemaUtils.{Timestamp, Version}
 import zio.dynamodb.{AttrMap, AttributeValue, Item, SchemaUtils}
-import zio.schema.DynamicValue.{Primitive, schema}
+import zio.schema.DynamicValue.Primitive
 import zio.schema.Schema.Field
-import zio.schema.Schema.Field.WithFieldName
-import zio.schema.{DynamicValue, Schema, StandardType}
+import zio.schema.{DynamicValue, Schema}
 
 import java.time.Instant
 import scala.annotation.StaticAnnotation
@@ -34,6 +32,13 @@ trait ConfigSchemaCodec[T] {
 }
 
 object ConfigSchemaCodec {
+  opaque type Timestamp = String
+  opaque type Version = Int
+  val VersionPlaceholder: Version = -1 //later should be removed and replaced with exception handler
+  
+  opaque type ResourcePrefix = String
+  opaque type ParentId = String
+  
   final case class resource_prefix(name: String) extends StaticAnnotation
 
   // uniquely identifies the record
@@ -182,9 +187,9 @@ object ConfigSchemaCodec {
         }
       }
 
-      override def resourcePrefix: String = resourcePrefixValue
+      override def resourcePrefix: ResourcePrefix = resourcePrefixValue
 
-      override def parentId(input: T): Timestamp = parentField.get(input)
+      override def parentId(input: T): ParentId = parentField.get(input)
 
       override def resourceId(input: T): String = idField.get(input)
 

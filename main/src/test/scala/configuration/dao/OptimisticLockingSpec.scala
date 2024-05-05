@@ -1,14 +1,13 @@
 package configuration.dao
 
 import com.dimafeng.testcontainers.scalatest.TestContainerForEach
-import configuration.ConfigSchemaCodec.{id_field, parent_field, resource_prefix}
+import configuration.ConfigSchemaCodec.{Timestamp, Version, id_field, parent_field, resource_prefix}
 import configuration.{ConfigSchemaCodec, CreateTable, DynamoContainer, WithDynamoDB}
 import org.scalatest.EitherValues
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.freespec.AnyFreeSpecLike
 import org.scalatest.matchers.must.Matchers
 import zio.dynamodb.AttrMap
-import zio.dynamodb.SchemaUtils.{Timestamp, Version}
 import zio.schema.{DeriveSchema, Schema}
 import zio.{Exit, IO, Unsafe}
 
@@ -62,16 +61,16 @@ class OptimisticLockingSpec extends AnyFreeSpecLike with ScalaFutures with Match
     history.length mustBe 3
 
     val first = history.head
-    val second = history(1)
-    val third = history(2)
+    val second: (VoiceEndpoint, Version, Timestamp) = history(1)
+    val third: (VoiceEndpoint, Version, Timestamp) = history(2)
     first._1 mustBe voiceEndpoint
-    first._2 mustBe 1
+    first._2 mustBe 1.asInstanceOf[Version]
 
     second._1 mustBe voiceEndpointV2
-    second._2 mustBe 2
+    second._2 mustBe 2.asInstanceOf[Version]
 
     third._1 mustBe voiceEndpointV3
-    third._2 mustBe 3
+    third._2 mustBe 3.asInstanceOf[Version]
 
     repo.read[VoiceEndpoint]("voice1").runUnsafe mustBe Some(voiceEndpointV3)
   }

@@ -1,11 +1,10 @@
 package configuration.dao
 
 import configuration.ConfigSchemaCodec
-import configuration.ConfigSchemaCodec.indexed
+import configuration.ConfigSchemaCodec.{Timestamp, Version, indexed}
 import configuration.TableStructure.*
 import configuration.dao.Repository.Config
 import zio.dynamodb.ProjectionExpression.$
-import zio.dynamodb.SchemaUtils.{Timestamp, Version}
 import zio.dynamodb.*
 import zio.schema.Schema
 import zio.{Chunk, ZIO, ZLayer}

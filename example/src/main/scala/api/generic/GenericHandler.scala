@@ -3,7 +3,7 @@ package api.generic
 import api.Protocol.CreateUser
 import api.StoreHandler
 import api.generic.GenericHandlerImpl.Processors
-import configuration.SchemaParser.ProcessedSchemaTyped
+import configuration.ConfigSchemaCodec
 import configuration.dao.Repository
 import service.ConfigurationService.User
 import zio.{Chunk, RuntimeFlags, ZIO, ZLayer}
@@ -18,7 +18,7 @@ trait GenericHandler {
 }
 
 object GenericHandlerImpl {
-  case class Processors(processors: Map[String, ProcessedSchemaTyped[_]])
+  case class Processors(processors: Map[String, ConfigSchemaCodec[_]])
   
   val live: ZLayer[Repository & Processors, Nothing, GenericHandler] = ZLayer.fromZIO(for {
     processors <- ZIO.service[Processors]
@@ -33,8 +33,8 @@ class GenericHandlerImpl(processors: Processors, repository: Repository) extends
     processors.processors.get(resourceName) match {
       case Some(processor) =>
         processor match {
-          case typedProcessor: ProcessedSchemaTyped[t] =>
-            given ProcessedSchemaTyped[t] = typedProcessor
+          case typedProcessor: ConfigSchemaCodec[t] =>
+            given ConfigSchemaCodec[t] = typedProcessor
 
             val x: ZIO[Any, Throwable, Chunk[t]] = repository.listAll[t]
 

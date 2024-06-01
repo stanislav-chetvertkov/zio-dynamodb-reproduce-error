@@ -1,6 +1,7 @@
 package zio.dynamodb
 
-import configuration.SchemaParser.id_field
+import configuration.ConfigSchemaCodec
+import configuration.ConfigSchemaCodec.{Timestamp, Version, VersionPlaceholder, id_field}
 import configuration.TableStructure.*
 import zio.dynamodb.Codec.Decoder.{ContainerField, decoder}
 import zio.dynamodb.DynamoDBError.ItemError.DecodingError
@@ -8,38 +9,40 @@ import zio.prelude.ForEachOps
 import zio.schema.Schema
 
 object SchemaUtils {
-  type Timestamp = String
-  type Version = Int
-
   def attributeValueMap(input: Map[AttributeValue.String, AttributeValue]): AttributeValue.Map = AttributeValue.Map(input)
 
   def attributeValueString(input: String): AttributeValue.String = AttributeValue.String(input)
 
-  type DecoderWithTimeStamp[+A] = AttributeValue => Either[DynamoDBError, (A, Version, Timestamp)]
+  private type DecoderWithTimeStamp[+A] = AttributeValue => Either[DynamoDBError, (A, Version, Timestamp)]
 
   def caseClass3Decoder[A, B, C, Z](schema: Schema.CaseClass3[A, B, C, Z]): DecoderWithTimeStamp[Z] = { (av: AttributeValue) =>
     val dec = SchemaUtils.decodeInnerFields(av, schema.field1, schema.field2, schema.field3)
     val k = dec.map(_._1).map { xs =>
       schema.construct(xs(0).asInstanceOf[A], xs(1).asInstanceOf[B], xs(2).asInstanceOf[C])
     }
-    k.map((_, dec.map(_._2).getOrElse(-1), dec.map(_._3).getOrElse("")))
+    val version: Version = dec.map(_._2).getOrElse(ConfigSchemaCodec.VersionPlaceholder)
+    k.map((_, version, dec.map(_._3).getOrElse("".asInstanceOf[Timestamp])))
   }
 
   def caseClass4Decoder[A, B, C, D, Z](schema: Schema.CaseClass4[A, B, C, D, Z]): DecoderWithTimeStamp[Z] = { (av: AttributeValue) =>
-    val dec = SchemaUtils.decodeInnerFields(av, schema.field1, schema.field2, schema.field3, schema.field4)
+    val dec: Either[DynamoDBError, (List[Any], Version, Timestamp)] =
+      SchemaUtils.decodeInnerFields(av, schema.field1, schema.field2, schema.field3, schema.field4)
+
     val k = dec.map(_._1).map { xs =>
       schema.construct(xs(0).asInstanceOf[A], xs(1).asInstanceOf[B], xs(2).asInstanceOf[C], xs(3).asInstanceOf[D])
     }
-    k.map((_, dec.map(_._2).getOrElse(-1), dec.map(_._3).getOrElse("")))
+    k.map((_, dec.map(_._2).getOrElse(VersionPlaceholder), (dec.map(_._3).getOrElse("").asInstanceOf[Timestamp])))
   }
 
   private def decodeInnerFields(av: AttributeValue, fields: Schema.Field[?, ?]*): Either[DynamoDBError, (List[Any], Version, Timestamp)] =
     av match {
       case AttributeValue.Map(map) =>
-        val versionOpt = map.get(AttributeValue.String("version")).map(_.asInstanceOf[AttributeValue.Number].value.toInt)
+        val versionOpt: Either[DecodingError, Version] = map.get(AttributeValue.String("version")).map(_.asInstanceOf[AttributeValue.Number].value.toInt.asInstanceOf[Version])
           .toRight(DecodingError(s"field 'version' not found in $av"))
 
-        val timestamp = map.get(AttributeValue.String("timestamp")).map(_.asInstanceOf[AttributeValue.String].value).getOrElse("")
+        val timestamp: Timestamp = map.get(AttributeValue.String("timestamp"))
+          .map(_.asInstanceOf[AttributeValue.String].value.asInstanceOf[Timestamp]).getOrElse("".asInstanceOf[Timestamp])
+
         val myVar = fields.toList.forEach {
           case Schema.Field(key, schema, annotations, _, _, _) =>
             if (annotations.exists(_.isInstanceOf[id_field])) {
@@ -61,7 +64,7 @@ object SchemaUtils {
               if (maybeValue.isEmpty) {
                 ContainerField.containerField(schema) match {
                   case ContainerField.Optional => Right(None)
-                  case ContainerField.List => Right(List.empty)
+                  case ContainerField.Sequence => Right(List.empty)
                   case ContainerField.Map => Right(Map.empty)
                   case ContainerField.Set => Right(Set.empty)
                   case ContainerField.Scalar => either
@@ -82,7 +85,7 @@ object SchemaUtils {
               if (maybeValue.isEmpty) {
                 ContainerField.containerField(schema) match {
                   case ContainerField.Optional => Right(None)
-                  case ContainerField.List => Right(List.empty)
+                  case ContainerField.Sequence => Right(List.empty)
                   case ContainerField.Map => Right(Map.empty)
                   case ContainerField.Set => Right(Set.empty)
                   case ContainerField.Scalar => either
@@ -93,11 +96,16 @@ object SchemaUtils {
             }
         }
 
-        myVar.map(_.toList).map((_, versionOpt.getOrElse(-1), timestamp))
+        myVar.map(_.toList).map((_, versionOpt.getOrElse(VersionPlaceholder), timestamp))
 
       case _ =>
         Left(DecodingError(s"$av is not an AttributeValue.Map"))
     }
 
+
+  def toItem[A](a: A)(implicit schema: Schema[A]): Item =
+    FromAttributeValue.attrMapFromAttributeValue
+      .fromAttributeValue(AttributeValue.encode(a)(schema))
+      .getOrElse(throw new Exception(s"error encoding $a"))
 
 }

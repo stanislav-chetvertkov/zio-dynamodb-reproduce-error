@@ -1,10 +1,10 @@
 package configuration.dao
 
-import configuration.SchemaParser.{ProcessedSchemaTyped, indexed}
+import configuration.ConfigSchemaCodec
+import configuration.ConfigSchemaCodec.{Timestamp, Version, indexed}
 import configuration.TableStructure.*
 import configuration.dao.Repository.Config
 import zio.dynamodb.ProjectionExpression.$
-import zio.dynamodb.SchemaUtils.{Timestamp, Version}
 import zio.dynamodb.*
 import zio.schema.Schema
 import zio.{Chunk, ZIO, ZLayer}
@@ -12,8 +12,8 @@ import zio.{Chunk, ZIO, ZLayer}
 case class Repository(config: Config, executor: DynamoDBExecutor, chunkSize: Int){
   val tableName: String = config.tableName
 
-  def queryByParameter[T: Schema : ProcessedSchemaTyped, A](partitionField: Schema.Field[T, A], value: A)
-                                                           (implicit t: ToAttributeValue[A])
+  def queryByParameter[T: Schema : ConfigSchemaCodec, A](partitionField: Schema.Field[T, A], value: A)
+                                                        (implicit t: ToAttributeValue[A])
   : ZIO[Any, Throwable, List[T]] = {
     val indexNameOpt = partitionField.annotations.collectFirst {
       case i:indexed[_] => i
@@ -27,7 +27,7 @@ case class Repository(config: Config, executor: DynamoDBExecutor, chunkSize: Int
 
     val items: ZIO[Any, Throwable, Chunk[Item]] = query.execute.flatMap(_.runCollect)
       .provideLayer(ZLayer.succeed(executor))
-    val proc = implicitly[ProcessedSchemaTyped[T]]
+    val proc = implicitly[ConfigSchemaCodec[T]]
     items.map(_.map { item =>
       proc.fromAttrMap(item)
     }.toList)
@@ -35,8 +35,8 @@ case class Repository(config: Config, executor: DynamoDBExecutor, chunkSize: Int
 
   // I guess I'd need to maintain history in a separate sorting key structure
   // on the initial write record 2 entries one with the current version and one history 'event'
-  def save[T: Schema : ProcessedSchemaTyped](value: T, currentVersion: Option[Int] = None): ZIO[Any, Throwable, Option[Item]] = {
-    val schemaProcessor = implicitly[ProcessedSchemaTyped[T]]
+  def save[T: Schema : ConfigSchemaCodec](value: T, currentVersion: Option[Int] = None): ZIO[Any, Throwable, Option[Item]] = {
+    val schemaProcessor = implicitly[ConfigSchemaCodec[T]]
     val prefix = schemaProcessor.resourcePrefix
     val parentId = schemaProcessor.parentId(value)
 
@@ -77,8 +77,8 @@ case class Repository(config: Config, executor: DynamoDBExecutor, chunkSize: Int
   // resource_type#history#id#timestamp
 
   // list resource items by parent
-  def list[T: ProcessedSchemaTyped](parent: String): ZIO[Any, Throwable, Chunk[T]] = {
-    val proc = implicitly[ProcessedSchemaTyped[T]]
+  def list[T: ConfigSchemaCodec](parent: String): ZIO[Any, Throwable, Chunk[T]] = {
+    val proc = implicitly[ConfigSchemaCodec[T]]
     val prefix = proc.resourcePrefix
 
     val query = DynamoDBQuery.queryAllItem(tableName)
@@ -94,8 +94,8 @@ case class Repository(config: Config, executor: DynamoDBExecutor, chunkSize: Int
 
 
   // uses GSI
-  def listAll[T: ProcessedSchemaTyped]: ZIO[Any, Throwable, Chunk[T]] = {
-    val proc = implicitly[ProcessedSchemaTyped[T]]
+  def listAll[T: ConfigSchemaCodec]: ZIO[Any, Throwable, Chunk[T]] = {
+    val proc = implicitly[ConfigSchemaCodec[T]]
     val prefix = proc.resourcePrefix
 
     for {
@@ -105,13 +105,13 @@ case class Repository(config: Config, executor: DynamoDBExecutor, chunkSize: Int
         .execute.flatMap(_.runCollect)
         .provideLayer(ZLayer.succeed(executor))
     } yield x.map { item =>
-      implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
+      implicitly[ConfigSchemaCodec[T]].fromAttrMap(item)
     }
   }
 
   // read by resource id (without specifying the parent)
-  def read[T: ProcessedSchemaTyped](id: String): ZIO[Any, Throwable, Option[T]] = {
-    val proc = implicitly[ProcessedSchemaTyped[T]]
+  def read[T: ConfigSchemaCodec](id: String): ZIO[Any, Throwable, Option[T]] = {
+    val proc = implicitly[ConfigSchemaCodec[T]]
     val prefix = proc.resourcePrefix
 
     val query = DynamoDBQuery.querySomeItem(tableName, chunkSize)
@@ -122,12 +122,12 @@ case class Repository(config: Config, executor: DynamoDBExecutor, chunkSize: Int
       .provideLayer(ZLayer.succeed(executor))
 
     x.map(_._1.headOption.map { item =>
-      implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
+      implicitly[ConfigSchemaCodec[T]].fromAttrMap(item)
     })
   }
 
-  def readHistory[T: ProcessedSchemaTyped](id: String): ZIO[Any, Throwable, List[(T, Version, Timestamp)]] = {
-    val proc = implicitly[ProcessedSchemaTyped[T]]
+  def readHistory[T: ConfigSchemaCodec](id: String): ZIO[Any, Throwable, List[(T, Version, Timestamp)]] = {
+    val proc = implicitly[ConfigSchemaCodec[T]]
     val prefix = proc.resourcePrefix
 
     val query = DynamoDBQuery.queryAllItem(tableName)
@@ -138,12 +138,12 @@ case class Repository(config: Config, executor: DynamoDBExecutor, chunkSize: Int
       .provideLayer(ZLayer.succeed(executor))
 
     x.map(_.toList.map { item =>
-      implicitly[ProcessedSchemaTyped[T]].fromAttrMapWithTimestamp(item)
+      implicitly[ConfigSchemaCodec[T]].fromAttrMapWithTimestamp(item)
     })
   }
 
-  def readTypedByParent[T: ProcessedSchemaTyped](id: String, parent: String): ZIO[Any, Throwable, Option[T]] = {
-    val proc = implicitly[ProcessedSchemaTyped[T]]
+  def readTypedByParent[T: ConfigSchemaCodec](id: String, parent: String): ZIO[Any, Throwable, Option[T]] = {
+    val proc = implicitly[ConfigSchemaCodec[T]]
     val prefix = proc.resourcePrefix
 
     val query = DynamoDBQuery.querySomeItem(tableName, chunkSize)
@@ -153,7 +153,7 @@ case class Repository(config: Config, executor: DynamoDBExecutor, chunkSize: Int
       .provideLayer(ZLayer.succeed(executor))
 
     val result: ZIO[Any, Throwable, Option[T]] = x.map(_._1.headOption.map { item =>
-      implicitly[ProcessedSchemaTyped[T]].fromAttrMap(item)
+      implicitly[ConfigSchemaCodec[T]].fromAttrMap(item)
     })
 
     result

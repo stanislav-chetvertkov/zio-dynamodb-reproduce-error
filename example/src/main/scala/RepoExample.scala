@@ -1,8 +1,8 @@
 import api.generic.GenericHandlerImpl.Processors
 import api.generic.{GenericHandler, GenericHandlerImpl, GenericResource}
 import api.{StoreHandler, StoreHandlerImpl, StoreResource}
-import configuration.{CreateTable, SchemaParser}
-import configuration.SchemaParser.{id_field, parent_field, resource_prefix}
+import configuration.ConfigSchemaCodec.{id_field, parent_field, resource_prefix}
+import configuration.{ConfigSchemaCodec, CreateTable}
 import configuration.dao.Repository
 import software.amazon.awssdk.auth.credentials.{AwsBasicCredentials, StaticCredentialsProvider}
 import software.amazon.awssdk.regions.Region
@@ -34,8 +34,8 @@ object RepoExample extends ZIOAppDefault {
   
   val processors: Processors = Processors(
     Map(
-      ("sms_endpoint", SchemaParser.validate(smsSchema)),
-      ("voice_endpoint", SchemaParser.validate(voiceSchema))
+      ("sms_endpoint", ConfigSchemaCodec.fromSchema(smsSchema)),
+      ("voice_endpoint", ConfigSchemaCodec.fromSchema(voiceSchema))
     )
   )
   
@@ -54,13 +54,13 @@ object RepoExample extends ZIOAppDefault {
   }
 
   override val run = {
-    val program: ZIO[GenericHandler with StoreHandler with DynamoDBExecutor, Throwable, Unit] = for {
+    val program: ZIO[GenericHandler & StoreHandler & DynamoDBExecutor, Throwable, Unit] = for {
       _ <- CreateTable.deleteTableQuery.execute.ignore
       _ <- CreateTable.createTableExample.execute
       apiHandler <- ZIO.service[StoreHandler]
       genericHandler <- ZIO.service[GenericHandler]
-      httpApp: HttpApp[Any] = {
-        StoreResource.routes(apiHandler).toHttpApp ++ GenericResource.routes(genericHandler).toHttpApp
+      httpApp = {
+        StoreResource.routes(apiHandler) ++ GenericResource.routes(genericHandler)
       }
       _ <- Server.serve(httpApp).provide(Server.defaultWithPort(8082))
     } yield ()

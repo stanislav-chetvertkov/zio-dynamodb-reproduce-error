@@ -1,16 +1,44 @@
 package configuration
 
+import configuration.ConfigSchemaCodec.{Timestamp, Version}
 import configuration.TableStructure.*
 import zio.Chunk
-import zio.dynamodb.SchemaUtils.{Timestamp, Version}
-import zio.dynamodb.{AttrMap, AttributeValue, SchemaUtils}
+import zio.dynamodb.{AttrMap, AttributeValue, Item, SchemaUtils}
+import zio.schema.DynamicValue.Primitive
+import zio.schema.Schema.Field
 import zio.schema.{DynamicValue, Schema}
 
 import java.time.Instant
 import scala.annotation.StaticAnnotation
 import scala.language.implicitConversions
 
-object SchemaParser {
+trait ConfigSchemaCodec[T] {
+
+  def derivedFrom: Schema[T]
+
+  def resourcePrefix: String
+
+  def parentId(input: T): String
+
+  def resourceId(input: T): String
+
+  def toAttrMap(input: T): AttrMap = toAttrMap(input, 1)
+
+  def toAttrMap(input: T, version: Int, isHistory: Boolean = false): AttrMap
+
+  def fromAttrMapWithTimestamp(attrMap: AttrMap): (T, Version, Timestamp)
+
+  def fromAttrMap(attrMap: AttrMap): T = fromAttrMapWithTimestamp(attrMap)._1
+}
+
+object ConfigSchemaCodec {
+  opaque type Timestamp = String
+  opaque type Version = Int
+  val VersionPlaceholder: Version = -1 //later should be removed and replaced with exception handler
+
+  opaque type ResourcePrefix = String
+  opaque type ParentId = String
+
   final case class resource_prefix(name: String) extends StaticAnnotation
 
   // uniquely identifies the record
@@ -51,32 +79,25 @@ object SchemaParser {
     fieldsWithIndexed
   }
 
-  // just a typed option to test things out
-  trait ProcessedSchemaTyped[T] {
-
-    def derivedFrom: Schema[T]
-
-    def resourcePrefix: String
-
-    def parentId(input: T): String
-
-    def resourceId(input: T): String
-
-    def toAttrMap(input: T): AttrMap = toAttrMap(input, 1)
-
-    def toAttrMap(input: T, version: Int, isHistory: Boolean = false): AttrMap
-
-    def fromAttrMapWithTimestamp(attrMap: AttrMap): (T, Version, Timestamp)
-
-    def fromAttrMap(attrMap: AttrMap): T = fromAttrMapWithTimestamp(attrMap)._1
+  enum ValidationError {
+    case MissingIdField
+    case MissingResourcePrefix
+    case ComplexTypeIndexed(fieldName: String)
   }
 
+  def validateIndexedField(field: Field[?, ?]): Either[ValidationError, Unit] = {
+    // check that it has primitive type (complex types could not be indexed
+    field.schema match {
+      case _: Primitive[_] => Right(())
+      case _ => Left(ValidationError.ComplexTypeIndexed(field.name))
+    }
+  }
 
-  implicit def toProcessor[T](implicit schema: Schema[T]): ProcessedSchemaTyped[T] = validate(schema)
+  implicit def toProcessor[T](implicit schema: Schema[T]): ConfigSchemaCodec[T] = fromSchema(schema)
 
   // fields for accessing timestamp, sort key, and partition key
   // validates the schema to make sure if has the required annotations and returns a processor
-  def validate[T](schema: Schema[T]): ProcessedSchemaTyped[T] = {
+  def fromSchema[T](schema: Schema[T]): ConfigSchemaCodec[T] = { //todo: should return either
     val record: Schema.Record[T] = schema match {
       case record: Schema.Record[_] => record
       case other => throw new RuntimeException(s"Expected record, got $other")
@@ -95,7 +116,7 @@ object SchemaParser {
 
     val indexedFields = findIndexedFields(record.fields)
 
-    new ProcessedSchemaTyped[T] {
+    new ConfigSchemaCodec[T] {
       def toAttrMap(input: T, version: Int, isHistoryRecord: Boolean = false): AttrMap = {
         val indexed = if (!isHistoryRecord) {
           indexedFields.map { case (field, indexed) =>
@@ -114,17 +135,7 @@ object SchemaParser {
           Map.empty[String, AttributeValue]
         }
 
-        val otherAttributes: Map[String, AttributeValue] = otherFields.map { field =>
-          val fieldValue = field.get(input)
-          val attrValue = fieldValue match { //is it compile time safe?
-            case s: String => AttributeValue[String](s)
-            case i: Int => AttributeValue[Int](i)
-            case b: Boolean => AttributeValue[Boolean](b)
-            case list: List[Long] => AttributeValue[List[Long]](list)
-            case other => throw new RuntimeException(s"Unsupported type: $other")
-          }
-          field.name -> attrValue
-        }.toMap
+        val x: Item = SchemaUtils.toItem(input)(schema)
 
         val now = Instant.now().toString //todo: should be passed as an argument
         val id = idField.get(input)
@@ -154,7 +165,7 @@ object SchemaParser {
           },
           TIMESTAMP -> AttributeValue(now),
           "version" -> AttributeValue(version)
-        ) ++ otherAttributes ++ indexed
+        ) ++ indexed ++ x.map
 
         AttrMap(attributes)
       }
@@ -176,9 +187,9 @@ object SchemaParser {
         }
       }
 
-      override def resourcePrefix: String = resourcePrefixValue
+      override def resourcePrefix: ResourcePrefix = resourcePrefixValue
 
-      override def parentId(input: T): Timestamp = parentField.get(input)
+      override def parentId(input: T): ParentId = parentField.get(input)
 
       override def resourceId(input: T): String = idField.get(input)
 

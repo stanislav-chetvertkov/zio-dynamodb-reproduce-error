@@ -1,9 +1,9 @@
 package configuration.dao
 
 import com.dimafeng.testcontainers.scalatest.TestContainerForEach
-import configuration.SchemaParser.{IndexName, id_field, indexed, parent_field, resource_prefix}
+import configuration.ConfigSchemaCodec.{IndexName, id_field, indexed, parent_field, resource_prefix}
 import configuration.TableStructure.*
-import configuration.{DynamoContainer, SchemaParser, WithDynamoDB}
+import configuration.{ConfigSchemaCodec, DynamoContainer, WithDynamoDB}
 import org.scalatest.EitherValues
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.freespec.AnyFreeSpecLike
@@ -43,6 +43,18 @@ class ValidationSpec extends AnyFreeSpecLike with ScalaFutures with Matchers wit
 
   implicit val userSchema: Schema[User] = DeriveSchema.gen
 
+  case class Address(zipCode: String, street: String, city: String)
+
+  @resource_prefix("nested_user")
+  case class NestedUser(@id_field id: String,
+                        @validate(Validation.minLength(3))
+                        name: String,
+                        address: Address,
+                        @parent_field parent: String) // will keep it as a string for now
+
+  implicit val nestedUserSchema: Schema[NestedUser] = DeriveSchema.gen
+
+
   val mccField: WithFieldName[SmsEndpoint, ?, String] = smsSchema match {
     case Schema.CaseClass4(_, id, mcc, mnc, parent, _, _) =>
       mcc match {
@@ -57,8 +69,18 @@ class ValidationSpec extends AnyFreeSpecLike with ScalaFutures with Matchers wit
     mnc.partitionKey
   }
 
+  "nested user test" in {
+    val processor = ConfigSchemaCodec.fromSchema(nestedUserSchema)
+    val user = NestedUser("1", "name" , Address("12345", "street", "city"), "parent#1")
+
+    val attrs = processor.toAttrMap(user)
+    println(attrs)
+    processor.fromAttrMap(attrs) mustBe user
+  }
+
+
   "test" in {
-    val processor = SchemaParser.validate(userSchema)
+    val processor = ConfigSchemaCodec.fromSchema(userSchema)
     val user = User("1", "name", List(1l, 2l, 3l), "parent#1")
 
     val attrs = processor.toAttrMap(user)
@@ -80,7 +102,6 @@ class ValidationSpec extends AnyFreeSpecLike with ScalaFutures with Matchers wit
     val result: List[SmsEndpoint] = repo.queryByParameter(mccField, "001").runUnsafe
 
     result must contain theSameElementsAs List(smsEndpoint1, smsEndpoint3)
-
   }
 
 }

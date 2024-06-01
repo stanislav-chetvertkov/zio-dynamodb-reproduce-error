@@ -145,8 +145,9 @@ we get 2 records
 
 
 
-## TODOS
+## TODOS:
 
+- [ ] deletions
 - [ ] case classes with complex fields 
 - [ ] validation when inserting data
 - [ ] auto migrations when changing the schema

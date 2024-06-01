@@ -3,7 +3,7 @@ package api.generic
 import api.Protocol.CreateUser
 import api.StoreHandler
 import api.generic.GenericHandlerImpl.Processors
-import configuration.SchemaParser.ConfigSchemaCodec
+import configuration.ConfigSchemaCodec
 import configuration.dao.Repository
 import service.ConfigurationService.User
 import zio.{Chunk, RuntimeFlags, ZIO, ZLayer}

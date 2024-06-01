@@ -64,7 +64,7 @@ object SchemaUtils {
               if (maybeValue.isEmpty) {
                 ContainerField.containerField(schema) match {
                   case ContainerField.Optional => Right(None)
-                  case ContainerField.List => Right(List.empty)
+                  case ContainerField.Sequence => Right(List.empty)
                   case ContainerField.Map => Right(Map.empty)
                   case ContainerField.Set => Right(Set.empty)
                   case ContainerField.Scalar => either
@@ -85,7 +85,7 @@ object SchemaUtils {
               if (maybeValue.isEmpty) {
                 ContainerField.containerField(schema) match {
                   case ContainerField.Optional => Right(None)
-                  case ContainerField.List => Right(List.empty)
+                  case ContainerField.Sequence => Right(List.empty)
                   case ContainerField.Map => Right(Map.empty)
                   case ContainerField.Set => Right(Set.empty)
                   case ContainerField.Scalar => either

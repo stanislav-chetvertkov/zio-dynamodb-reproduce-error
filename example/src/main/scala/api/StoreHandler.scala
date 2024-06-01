@@ -1,9 +1,10 @@
 package api
 
 import api.Protocol.CreateUser
+import api.StoreResource.GetUserByIdResponse
 import service.ConfigurationService.User
-import zio._
-import zio.http._
+import zio.*
+import zio.http.*
 import zio.json.{DecoderOps, DeriveJsonDecoder, EncoderOps, JsonDecoder}
 
 
@@ -34,15 +35,20 @@ object StoreResource {
 
   case class ServiceError(message: String) extends Error
 
+  def getUserByIdRoute(impl: StoreHandler): Route[Any, Response] = {
+    val pattern: RoutePattern[Int] = Method.GET / "users" / int("id")
+    pattern -> {
+      Handler.fromFunctionZIO { (in: (Int, Request)) =>
+        impl.getOrderById(GetUserByIdResponse)(in._1)
+          .map(r => r.toResponse)
+      }.mapError(e => Response.text("Error: " + e.getMessage).status(Status.InternalServerError))
+    }
+  }
+
+//  Routes.fromIterable() try that as well
+
   def routes(impl: StoreHandler): Routes[Any, Response] = Routes(
-    Method.GET / "users" / int("id") -> {
-      val x: Handler[Any, Throwable, (RuntimeFlags, Request), Response] =
-        Handler.fromFunctionZIO { (in: (Int, Request)) =>
-          impl.getOrderById(GetUserByIdResponse)(in._1)
-            .map(r => r.toResponse)
-        }
-      x.mapError(e => Response.text("Error: " + e.getMessage).status(Status.InternalServerError))
-    },
+    getUserByIdRoute(impl),
     Method.POST / "users" -> {
       val r = for {
         userCreated <- Handler.fromFunction[CreateUser] { (c: CreateUser) => c }
@@ -104,9 +110,9 @@ object StoreResource {
 
   object GetUserByIdResponse {
 
-//    def apply[T](value: T)(implicit ev: T => GetUserByIdResponse): GetUserByIdResponse = ev(value)
+    //    def apply[T](value: T)(implicit ev: T => GetUserByIdResponse): GetUserByIdResponse = ev(value)
 
-//    implicit def OKEv(value: User): GetUserByIdResponse = OK(value)
+    //    implicit def OKEv(value: User): GetUserByIdResponse = OK(value)
 
     def OK(value: User): GetUserByIdResponse = GetUserByIdResponseOK(value)
 

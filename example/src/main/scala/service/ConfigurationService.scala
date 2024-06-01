@@ -1,6 +1,7 @@
 package service
 
-import configuration.SchemaParser.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2, IndexName, id_field, indexed, parent_field, resource_prefix}
+import configuration.ConfigSchemaCodec.{IndexName, id_field, indexed, parent_field, resource_prefix}
+import configuration.TableStructure.{GSI_INDEX_NAME2, GSI_PK2, GSI_SK2}
 import configuration.dao.Repository
 import zio.json.{JsonCodec, JsonDecoder, JsonEncoder}
 import zio.schema.Schema.Field

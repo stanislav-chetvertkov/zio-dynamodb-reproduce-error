@@ -35,10 +35,10 @@ object ConfigSchemaCodec {
   opaque type Timestamp = String
   opaque type Version = Int
   val VersionPlaceholder: Version = -1 //later should be removed and replaced with exception handler
-  
+
   opaque type ResourcePrefix = String
   opaque type ParentId = String
-  
+
   final case class resource_prefix(name: String) extends StaticAnnotation
 
   // uniquely identifies the record
@@ -78,13 +78,13 @@ object ConfigSchemaCodec {
 
     fieldsWithIndexed
   }
-  
+
   enum ValidationError {
     case MissingIdField
     case MissingResourcePrefix
     case ComplexTypeIndexed(fieldName: String)
   }
-  
+
   def validateIndexedField(field: Field[?, ?]): Either[ValidationError, Unit] = {
     // check that it has primitive type (complex types could not be indexed
     field.schema match {
